@@ -1,0 +1,69 @@
+{
+  "_help": [
+    "示例登记表。复制为 monitor_hub_projects.json（本机真实登记表，不进仓库）后按实际路径修改。字段说明见 docs/ARCHITECTURE.md 第 2.1 节和 hub/monitor_hub_README.md 第 9 节。",
+    "adapter: generic = 读 hub_status.json（新监控统一用这个）；markdown = 读状态 Markdown 表格；qoi = 专用适配器示例。",
+    "runner.kind: schtask = Windows 定时任务；detach = cdesktop-detach 后台作业（start_cmd 里的 {interval} 会换成 interval_min）。"
+  ],
+  "projects": [
+    {
+      "id": "example-hpc-batch",
+      "name": "示例 · HPC 计算批次",
+      "area": "计算化学 · HPC PBS",
+      "adapter": "generic",
+      "runner": {"kind": "schtask", "name": "example-batch-monitor-5h", "interval_min": 300},
+      "dir": "D:\\Research\\Example\\batch\\monitor",
+      "status_json": "D:\\Research\\Example\\batch\\monitor\\hub_status.json",
+      "log": "D:\\Research\\Example\\batch\\SUBMISSION.md",
+      "report": "D:\\Research\\Example\\batch\\monitor\\claude_takeover_latest.md",
+      "takeovers": {
+        "kind": "glob",
+        "pattern": "D:\\Research\\Example\\batch\\monitor\\claude_takeover_*.jsonl",
+        "last": "D:\\Research\\Example\\batch\\monitor\\claude_takeover_last.json",
+        "lock": "D:\\Research\\Example\\batch\\monitor\\claude_takeover.lock"
+      },
+      "results": [{"label": "结果表", "path": "D:\\Research\\Example\\batch\\results\\batch_table.md"}],
+      "claude_config_dir": null,
+      "qa_cwd": "D:\\Research\\Example\\batch",
+      "qa_sources": ["D:\\Research\\Example\\batch\\monitor\\", "D:\\Research\\Example\\batch\\SUBMISSION.md"],
+      "live_query": {"label": "集群队列（qstat）", "cmd": ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "<host-alias>", "qstat -u <user> -w"]}
+    },
+    {
+      "id": "example-local-loop",
+      "name": "示例 · 本机长时间计算",
+      "area": "本机计算",
+      "adapter": "generic",
+      "runner": {
+        "kind": "detach",
+        "name": "example-local-monitor",
+        "interval_min": 15,
+        "start_cmd": "& 'D:\\Path\\To\\python.exe' 'D:\\Research\\Example\\local\\monitor.py' --loop --interval {interval}",
+        "workdir": "D:\\Research\\Example\\local"
+      },
+      "dir": "D:\\Research\\Example\\local\\monitor",
+      "status_json": "D:\\Research\\Example\\local\\monitor\\hub_status.json",
+      "log": "D:\\Research\\Example\\local\\monitor\\events.log",
+      "takeovers": {"kind": "detach", "prefix": "example-local-takeover-"},
+      "results": [{"label": "RESULTS.md", "path": "D:\\Research\\Example\\local\\RESULTS.md"}],
+      "claude_config_dir": null,
+      "qa_cwd": "D:\\Research\\Example\\local",
+      "qa_sources": ["D:\\Research\\Example\\local\\monitor\\"]
+    },
+    {
+      "id": "example-legacy-markdown",
+      "name": "示例 · 旧格式监控（Markdown 状态表）",
+      "area": "计算化学 · HPC PBS",
+      "adapter": "markdown",
+      "runner": {"kind": "schtask", "name": "example-legacy-monitor-5h", "interval_min": 300},
+      "dir": "D:\\Research\\Example\\legacy\\monitor",
+      "status_md": "D:\\Research\\Example\\legacy\\monitor\\status_latest.md",
+      "attention": "D:\\Research\\Example\\legacy\\monitor\\attention_latest.txt",
+      "done_file": "D:\\Research\\Example\\legacy\\NEXT_CHECK.txt",
+      "log": "D:\\Research\\Example\\legacy\\SUBMISSION.md",
+      "takeovers": {"kind": "glob", "pattern": "D:\\Research\\Example\\legacy\\monitor\\claude_takeover_*.jsonl"},
+      "results_glob": ["D:\\Research\\Example\\legacy\\results\\*.md"],
+      "claude_config_dir": null,
+      "qa_cwd": "D:\\Research\\Example\\legacy",
+      "qa_sources": ["D:\\Research\\Example\\legacy\\monitor\\"]
+    }
+  ]
+}

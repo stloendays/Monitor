@@ -1,0 +1,7 @@
+# the machine's real registry (local paths and project names) stays local; the example is committed
+hub/monitor_hub_projects.json
+__pycache__/
+*.pyc
+*.bak-*
+*.tmp
+demo_snapshots.json
