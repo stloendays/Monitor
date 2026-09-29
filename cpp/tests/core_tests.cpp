@@ -29,6 +29,19 @@ int main() {
     assert(iso_minutes("PT1H30M") == 90);
     assert(short_time("2026-09-28T21:45:00") == "09-28 21:45");
 
+    SystemInfo fixture_sys;
+    TaskInfo fixture_task;
+    fixture_task.name = "demo__monitor__local__15m";
+    fixture_task.state = "Ready";
+    fixture_task.result = 0;
+    fixture_task.interval = "PT15M";
+    fixture_sys.tasks[fixture_task.name] = fixture_task;
+    fixture_sys.procs.push_back(ProcessInfo{1234, "python.exe", "python monitor__demo__local__15m.py"});
+    const auto fixture_json = system_info_json(fixture_sys);
+    assert(fixture_json.at("tasks").as_object().contains("demo__monitor__local__15m"));
+    assert(fixture_json.at("procs").as_array().size() == 1);
+    assert(fixture_json.at("error").as_string().empty());
+
     const auto root = fs::temp_directory_path() / "monitor-hub-cpp-core-test";
     fs::remove_all(root);
     fs::create_directories(root);
