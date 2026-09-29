@@ -55,17 +55,17 @@ Project = {
   claude_config_dir: null | path,       // 这个项目的接管和提问用哪个 Claude 配置目录
   qa_cwd, qa_sources: [..],             // 提问会话的工作目录、告诉它去哪里找资料
   live_query?: { label, cmd: [argv] },  // 只读的实时查询
-  monitor_script?                       // qoi 适配器：导入监控脚本，实时统计检查点
+  monitor_script?                       // qoi 旧版 fallback：仅 RUNNING 且 status.live 缺失时导入监控脚本；新监控不应依赖它
 }
 ```
 
 ### 2.2 通用状态文件 `hub_status.json`
 格式见 `hub/hub_status.schema.json` 和用户说明第 9.4 节。关键字段：`updated`（ISO 时间）、`headline`、`summary`、`done`、`table{cols,rows,tags}`、`attention[]`（只放需要用户决定的事）、`working`、`notes[]`、`next`、`results[]`、`error`（监控自身的故障）。
 
-### 2.3 Markdown 状态文件（旧的 HPC 监控）
-第一行 `# 标题`，第一段是一句话结论，然后是一张 Markdown 表格（必须有「状态」列，最好有「进度」列），`**备注：**` 下面是 `- ` 开头的列表，另有 `下次检查：…` 行。连不上服务器时正文里包含 `ssh/remote monitor FAILED`。
+### 2.3 QoI 兼容状态文件
+旧 QoI `status.json` 仍由 `adapter: "qoi"` 读取；新格式可写顶层 `live.{job}` 提供实时 checkpoints / failures / newest_checkpoint，从而避免总台动态导入项目模块。任务行还可写 `workdir / log / result / params`，总台会转成统一 `row_meta`。完整规则与示例见 `docs/QOI_ADAPTER.md`、`hub/qoi_status.example.json`。新监控仍优先使用 generic `hub_status.json`。\n\n### 2.4 Markdown 状态文件（旧的 HPC 监控）\n第一行 `# 标题`，第一段是一句话结论，然后是一张 Markdown 表格（必须有「状态」列，最好有「进度」列），`**备注：**` 下面是 `- ` 开头的列表，另有 `下次检查：…` 行。连不上服务器时正文里包含 `ssh/remote monitor FAILED`。
 
-### 2.4 接管记录（stream-json，一行一个 JSON）
+### 2.5 接管记录（stream-json，一行一个 JSON）
 ```
 {"type":"system","subtype":"init","session_id":..,"cwd":..,"model":..,"tools":[..]}
 {"type":"assistant","message":{"content":[{"type":"text","text":..} | {"type":"tool_use","name":..,"input":{..}}]}}
@@ -75,10 +75,10 @@ Project = {
 - `session_id` + `cwd` 用来「接着问」（`claude --resume <id> --fork-session`，用同一个配置目录、在同一个 `cwd` 里运行）。
 - 文件名约定：`claude_takeover_<YYYYMMDD_HHMM>.jsonl`（定时任务型），或 cdesktop 作业 `<prefix><YYYYMMDD-HHMMSS>\output.log`。
 
-### 2.5 cdesktop-detach 作业目录 `%LOCALAPPDATA%\cdesktop-jobs\<name>\`
+### 2.6 cdesktop-detach 作业目录 `%LOCALAPPDATA%\cdesktop-jobs\<name>\`
 `run.ps1`（包装脚本）、`output.log`、`pid`、`started`、`exitcode`（结束时写入；`stopped` 表示被手动停止）。判断运行中的条件：没有 `exitcode`，并且这个 pid 的进程命令行里包含作业目录路径（防止 pid 被别的进程复用）。
 
-### 2.6 新任务请求 `D:\Research\monitor-hub\requests\`
+### 2.7 新任务请求 `D:\Research\monitor-hub\requests\`
 `<stamp>_request.md`（用户填写的请求）、`<stamp>_prompt.txt`（发给后台 Claude 的完整提示词）、`<stamp>_report.md`（它写的办理报告，最后一行 `NEEDS_USER: …`）。对应的后台作业名是 `hub-setup-<stamp>`。
 
 ## 3. 健康判定（`snapshot()`，自上而下，命中即止）
