@@ -1,24 +1,23 @@
-# Monitor Hub C++ migration — phase 1
+# Monitor Hub C++ migration
 
 This directory starts the C++20 migration of `hub/monitor_hub.py`. The Python implementation remains the production GUI during this phase; existing monitor scripts and status-file formats do not change.
 
-Implemented in phase 1:
+Implemented so far:
 
 - project registry loading;
-- generic `hub_status.json` adapter;
-- status-row classification and automatic summary generation;
-- runner normalization for `runner.kind = none` plus Task Scheduler fixture data;
-- final-result list merging;
-- health priority compatible with `docs/ARCHITECTURE.md` (`done → error → paused → attention → stale → working → ok`);
-- the built-in “新任务办理” placeholder project;
-- `monitor_hub_cli --dump` JSON output for compatibility testing;
-- unit tests for the core rules;
-- Windows/MSVC CI through GitHub Actions.
+- generic `hub_status.json` adapter and status-contract validation;
+- status-row classification, `row_meta` parity, result merging and health evaluation;
+- live Windows Task Scheduler probing through the Task Scheduler COM API;
+- live `Win32_Process` probing through WMI, without spawning PowerShell;
+- `runner.kind = none / schtask / detach` state normalization;
+- detached monitor auto-discovery under the cdesktop job root;
+- detached and glob-style Claude takeover history indexing;
+- deterministic `--system-info FILE` fixtures for CI and compatibility tests;
+- `monitor_hub_cli --dump` JSON output;
+- Windows/MSVC CI and unit tests.
 
-Still handled by Python and scheduled for the next phases:
+Still handled by Python and scheduled for later phases:
 
-- live Task Scheduler COM and WMI probing;
-- detached-job probing and takeover indexing;
 - Markdown and QoI adapters;
 - stream-json transcript rendering;
 - Qt 6 GUI;
@@ -47,4 +46,4 @@ $env:MONITOR_HUB_NO_DISCOVERY="1"
 .\build\Release\monitor_hub_cli.exe --dump > cpp_demo_snapshots.json
 ```
 
-Phase 1 intentionally migrates the deterministic core first. The production Python GUI remains the fallback until the Windows probe and Qt UI have parity tests.
+The production Python GUI remains the fallback until the Qt UI and management/Q&A surfaces have parity tests. The C++ CLI now uses live Task Scheduler + WMI probing by default; pass `--system-info FILE` to force deterministic fixture data.
