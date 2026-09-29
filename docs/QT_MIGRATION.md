@@ -23,7 +23,11 @@ The optional `monitor_hub_qt` target currently provides a read-only operational 
 - second-launch activation of the existing window;
 - system-tray background presence;
 - close-to-tray behavior with explicit **Quit**;
-- optional `--background` launch mode.
+- optional `--background` launch mode;
+- persistent close-to-tray and notification settings;
+- user-controlled Windows launch-at-login with development-checkout protection;
+- important project-health transition notifications;
+- copyable desktop diagnostics and `--desktop-diagnostics`.
 
 The Python/Tkinter app remains the production fallback until the remaining surfaces reach parity.
 
@@ -80,10 +84,11 @@ The following still stay in Python or in later desktop/release phases:
 - new-monitor setup-agent launching;
 - Markdown and QoI-specific adapters;
 - rich transcript rendering / follow mode;
-- launch-at-login and persistent desktop settings;
 - installer/shortcut icon packaging;
-- notification routing from normalized project/issue events;
+- issue-level and agent-run event notifications beyond project-health transitions;
 - updater restart integration and packaged release installation;
-- crash-session recovery journals.
+- application log-file / diagnostics viewer integration;
+- crash-session recovery journals;
+- persisted window geometry and last-open project.
 
 These should be moved only after the read-only Qt shell and desktop lifecycle are visually and behaviorally checked against the Python fallback.

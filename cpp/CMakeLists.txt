@@ -36,6 +36,7 @@ if(MONITOR_HUB_BUILD_QT)
         src/qt_main.cpp
         src/qt_main_window.cpp
         src/qt_desktop_controller.cpp
+        src/qt_desktop_settings.cpp
     )
     qt_add_resources(monitor_hub_qt monitor_hub_resources
         PREFIX "/monitor_hub"
