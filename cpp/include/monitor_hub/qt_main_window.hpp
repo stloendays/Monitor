@@ -1,0 +1,73 @@
+#pragma once
+
+#include "monitor_hub/core.hpp"
+
+#include <QMainWindow>
+
+#include <map>
+#include <string>
+#include <vector>
+
+class QLabel;
+class QListWidget;
+class QPushButton;
+class QTableWidget;
+class QTabWidget;
+class QTextEdit;
+class QTimer;
+
+namespace monitor_hub {
+
+class QtMainWindow final : public QMainWindow {
+public:
+    explicit QtMainWindow(RuntimePaths paths, QWidget* parent = nullptr);
+
+private:
+    void build_ui();
+    void refresh();
+    void render_sidebar();
+    void select_project(const std::string& id);
+    void render_project();
+    void render_task_detail();
+    void render_takeovers();
+    void render_results();
+
+    const json::object* current_project() const;
+    const json::object* current_snapshot() const;
+    const json::object* selected_task_meta() const;
+
+    void open_task_target(const std::string& key = {});
+    void copy_task_command();
+
+    RuntimePaths paths_;
+    SystemInfo system_;
+    std::vector<json::object> projects_;
+    std::map<std::string, json::object> snapshots_;
+    std::string selected_project_;
+    std::string selected_task_id_;
+
+    QListWidget* project_list_ = nullptr;
+    QLabel* title_ = nullptr;
+    QLabel* area_ = nullptr;
+    QLabel* health_ = nullptr;
+    QLabel* headline_ = nullptr;
+    QLabel* runner_ = nullptr;
+    QTabWidget* tabs_ = nullptr;
+
+    QTableWidget* progress_ = nullptr;
+    QTextEdit* notes_ = nullptr;
+    QLabel* task_title_ = nullptr;
+    QLabel* task_sub_ = nullptr;
+    QLabel* task_paths_ = nullptr;
+    QTableWidget* params_ = nullptr;
+    QPushButton* open_task_ = nullptr;
+    QPushButton* open_log_ = nullptr;
+    QPushButton* open_result_ = nullptr;
+    QPushButton* copy_command_ = nullptr;
+
+    QTableWidget* takeovers_ = nullptr;
+    QTableWidget* results_ = nullptr;
+    QTimer* timer_ = nullptr;
+};
+
+}  // namespace monitor_hub
