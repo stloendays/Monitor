@@ -1,12 +1,14 @@
 #pragma once
 
 #include "monitor_hub/qt_desktop_settings.hpp"
+#include "monitor_hub/qt_update_service.hpp"
 
 #include <QIcon>
 #include <QObject>
 #include <QString>
 
 #include <map>
+#include <optional>
 #include <string>
 
 class QAction;
@@ -54,15 +56,24 @@ private:
     void copy_diagnostics();
     void poll_project_notifications(bool baseline_only = false);
 
+    void check_for_updates(bool interactive);
+    void begin_update_install(const QtUpdateRelease& release);
+    void open_pending_release_page();
+
     QtMainWindow* window_ = nullptr;
     QLocalServer* instance_server_ = nullptr;
     QSystemTrayIcon* tray_ = nullptr;
     QAction* status_action_ = nullptr;
+    QAction* update_action_ = nullptr;
     QTimer* notification_timer_ = nullptr;
+    QTimer* update_timer_ = nullptr;
+    QtUpdateService* updates_ = nullptr;
 
     DesktopSettings settings_;
     std::map<std::string, ProjectStateMemory> previous_project_states_;
+    std::optional<QtUpdateRelease> pending_update_;
     bool project_state_baselined_ = false;
+    bool update_busy_ = false;
     bool force_quit_ = false;
     bool background_notice_shown_ = false;
 };
