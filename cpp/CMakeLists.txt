@@ -45,6 +45,7 @@ if(MONITOR_HUB_BUILD_QT)
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/monitor_hub.svg"
     )
     if(WIN32)
+        enable_language(RC)
         set(MONITOR_HUB_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/monitor_hub.ico")
         configure_file(
             resources/monitor_hub.rc.in
