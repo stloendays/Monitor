@@ -38,6 +38,7 @@ if(MONITOR_HUB_BUILD_QT)
         src/qt_main_window.cpp
         src/qt_desktop_controller.cpp
         src/qt_desktop_settings.cpp
+        src/qt_update_service.cpp
     )
     qt_add_resources(monitor_hub_qt monitor_hub_resources
         PREFIX "/monitor_hub"
@@ -69,6 +70,21 @@ if(MONITOR_HUB_BUILD_QT)
         target_compile_options(monitor_hub_qt PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     install(TARGETS monitor_hub_qt RUNTIME DESTINATION bin)
+
+    qt_add_executable(monitor_hub_updater
+        src/qt_updater_helper.cpp
+    )
+    target_link_libraries(monitor_hub_updater PRIVATE Qt6::Core)
+    if(MSVC)
+        target_compile_options(monitor_hub_updater PRIVATE /W4 /permissive- /utf-8)
+    else()
+        target_compile_options(monitor_hub_updater PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    install(TARGETS monitor_hub_updater RUNTIME DESTINATION bin)
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/windows/safe_extract_update.ps1"
+        DESTINATION tools
+    )
 endif()
 
 include(CTest)
