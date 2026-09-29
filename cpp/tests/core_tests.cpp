@@ -91,6 +91,38 @@ int main() {
     const auto stopped = runner_info(dp, detached_sys, paths);
     assert(stopped.exists && !stopped.running && stopped.paused && !stopped.error);
 
+    // Detached takeover history is indexed from cdesktop job folders.
+    const auto tk = paths.job_root / "demo-takeover-20260929-1315";
+    write_file(tk / "exitcode", "0\n");
+    write_file(tk / "output.log",
+        "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"fixed and resumed\",\"duration_ms\":1000,\"total_cost_usd\":0.01}\n");
+    json::object tp;
+    tp["id"] = "tk";
+    json::object tr;
+    tr["kind"] = "none";
+    tp["runner"] = tr;
+    json::object tcfg;
+    tcfg["kind"] = "detach";
+    tcfg["prefix"] = "demo-takeover-";
+    tp["takeovers"] = tcfg;
+    const auto indexed = takeovers(tp, detached_sys, paths);
+    assert(indexed.size() == 1);
+    assert(indexed[0].as_object().at("state").as_string() == "ok");
+    assert(indexed[0].as_object().at("summary").as_string() == "fixed and resumed");
+
+    // Discovery includes unregistered detached monitor folders.
+    const auto unregistered = paths.job_root / "extra__monitor__local__15m";
+    write_file(unregistered / "exitcode", "0\n");
+    write_file(unregistered / "run.ps1", "python monitor__extra__local__15m.py\n");
+    write_file(paths.registry, "{\"projects\":[]}");
+    paths.discovery = true;
+    const auto projects = load_projects(detached_sys, paths);
+    bool found_detached = false;
+    for(const auto& item : projects)
+        if(item.if_contains("id") && item.at("id").is_string() && item.at("id").as_string() == "job:extra__monitor__local__15m")
+            found_detached = true;
+    assert(found_detached);
+
     fs::remove_all(root);
     std::cout << "core tests passed\n";
     return 0;
