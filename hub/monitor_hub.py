@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import messagebox, simpledialog, ttk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +34,7 @@ sys.path.insert(0, HERE)
 import claude_stream as cs  # noqa: E402
 import naming as nm  # noqa: E402
 import status_contract as contract  # noqa: E402
+import updater as hub_updater  # noqa: E402
 
 # MONITOR_HUB_REGISTRY / MONITOR_HUB_DATA point the hub at other data (demo mode: tests/demo/make_demo.py);
 # MONITOR_HUB_NO_DISCOVERY=1 hides the machine's unregistered monitors.
@@ -870,6 +872,9 @@ class Hub(tk.Tk):
         self.res_path = None
         self._tip_win = None
         self._tip_after = None
+        self._update_release = None
+        self._staged_update = None
+        self._update_busy = False
         os.makedirs(os.path.join(HUB_DATA, "qa"), exist_ok=True)
         os.makedirs(REQ_DIR, exist_ok=True)
         self._style()
@@ -878,6 +883,7 @@ class Hub(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.after(300, self._tick)
         self.after(100, self._qa_pump)
+        self.after(5000, lambda: self._start_update_check(manual=False))
         self.after(50, lambda: (self.deiconify(), self.lift(), self.focus_force()))
 
     # ---------- style / layout ----------
@@ -996,6 +1002,11 @@ class Hub(tk.Tk):
         b = ttk.Button(bot2, text="编辑项目表", command=lambda: os.startfile(REGISTRY))
         b.pack(side="left", padx=6)
         self._tooltip(b, "打开项目注册表 monitor_hub_projects.json；这里决定哪些正式项目出现在总台。")
+        self.update_btn = ttk.Button(bot2, text="检查更新", command=self._update_click)
+        self.update_btn.pack(side="left")
+        self._tooltip(self.update_btn, "检查 GitHub 的最新正式 Release。开发仓库只提示版本，不会覆盖当前分支或工作树。")
+        self.side_version = tk.Label(side, text="版本 %s" % hub_updater.current_version(), font=(UI, 10), fg=INK, bg="white")
+        self.side_version.pack(anchor="w", padx=16, pady=(2, 0))
         self.side_time = tk.Label(side, text="", font=(UI, 10), fg=INK, bg="white")
         self.side_time.pack(anchor="w", padx=16, pady=(2, 8))
 
@@ -1004,6 +1015,146 @@ class Hub(tk.Tk):
         self._build_overview()
         self._build_project()
         self._show_overview()
+
+    # ---------- application update ----------
+    def _start_update_check(self, manual=False):
+        if self._update_busy:
+            return
+        if not manual and os.environ.get("MONITOR_HUB_NO_UPDATE") == "1":
+            return
+        self._update_busy = True
+        self.update_btn.configure(text="检查中…", state="disabled")
+
+        def worker():
+            try:
+                result = hub_updater.check_for_update(
+                    state_path=os.path.join(HUB_DATA, "update_state.json"),
+                    force=manual,
+                )
+                error = None
+            except Exception as e:  # noqa: BLE001
+                result, error = None, e
+            self.after(0, lambda: self._finish_update_check(result, error, manual))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_update_check(self, result, error, manual):
+        self._update_busy = False
+        self.update_btn.configure(state="normal")
+        if error is not None:
+            self.update_btn.configure(text="检查更新")
+            self._set_tooltip(self.update_btn, "上次检查更新失败：%s\\n点击可重试。" % error)
+            if manual:
+                messagebox.showwarning("检查更新失败", str(error), parent=self)
+            return
+
+        current = result.get("current_version") or hub_updater.current_version()
+        release = result.get("release")
+        if result.get("available") and release:
+            self._update_release = release
+            latest = release.get("version") or release.get("tag_name")
+            self.update_btn.configure(text="更新到 v%s" % latest)
+            self.side_version.configure(text="版本 %s · 有更新" % current)
+            self._set_tooltip(self.update_btn, "GitHub 已发布 v%s。点击查看版本说明并选择是否下载安装。\\n开发仓库不会被自动覆盖。" % latest)
+            if manual:
+                self._prompt_update()
+            return
+
+        self._update_release = None
+        self._staged_update = None
+        self.update_btn.configure(text="检查更新")
+        self.side_version.configure(text="版本 %s · 已是最新" % current)
+        self._set_tooltip(self.update_btn, "当前没有更新的正式 Release；点击可立即重新检查。")
+        if manual:
+            if release is None:
+                messagebox.showinfo("检查更新", "GitHub 目前还没有正式 Release。", parent=self)
+            else:
+                messagebox.showinfo("检查更新", "当前版本 %s 已是最新。" % current, parent=self)
+
+    def _update_click(self):
+        if self._update_busy:
+            return
+        if self._staged_update:
+            self._launch_staged_update()
+        elif self._update_release:
+            self._prompt_update()
+        else:
+            self._start_update_check(manual=True)
+
+    def _prompt_update(self):
+        release = self._update_release
+        if not release:
+            return
+        latest = release.get("version") or release.get("tag_name") or ""
+        notes = (release.get("body") or "").strip()
+        if len(notes) > 1800:
+            notes = notes[:1800].rstrip() + "\\n…"
+        mode = hub_updater.install_mode()
+        if mode != "release":
+            kind = "Git 开发目录" if mode == "development" else "非 Release 安装目录"
+            text = ("发现新版本 v%s。\\n\\n当前程序运行在%s。为避免覆盖正在工作的分支、main 或本地修改，自动安装已禁用。\\n可以打开 GitHub Release 页面手动查看/下载。") % (latest, kind)
+            if notes:
+                text += "\\n\\n版本说明：\\n" + notes
+            if messagebox.askyesno("发现新版本", text + "\\n\\n现在打开 Release 页面？", parent=self):
+                url = release.get("html_url")
+                if url:
+                    webbrowser.open(url)
+            return
+
+        text = "发现新版本 v%s。下载后会在退出程序后备份旧文件、安装并自动重启。" % latest
+        if notes:
+            text += "\\n\\n版本说明：\\n" + notes
+        if messagebox.askyesno("安装更新", text + "\\n\\n现在下载？", parent=self):
+            self._download_update()
+
+    def _download_update(self):
+        release = self._update_release
+        if not release or self._update_busy:
+            return
+        self._update_busy = True
+        self.update_btn.configure(text="下载更新…", state="disabled")
+
+        def worker():
+            try:
+                staged = hub_updater.stage_release(release, base_dir=os.path.join(HUB_DATA, "updates", "staged"))
+                error = None
+            except Exception as e:  # noqa: BLE001
+                staged, error = None, e
+            self.after(0, lambda: self._finish_update_download(staged, error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_update_download(self, staged, error):
+        self._update_busy = False
+        self.update_btn.configure(state="normal")
+        if error is not None:
+            self.update_btn.configure(text="重新下载更新")
+            self._set_tooltip(self.update_btn, "更新下载或校验失败：%s\\n点击可重新检查。" % error)
+            messagebox.showerror("更新失败", str(error), parent=self)
+            return
+        self._staged_update = staged
+        self.update_btn.configure(text="重启并安装")
+        self.side_version.configure(text="版本 %s · 更新已下载" % hub_updater.current_version())
+        self._set_tooltip(self.update_btn, "更新包已经完成 SHA-256 和 manifest 校验。点击后退出总台、安装并自动重启。")
+        if messagebox.askyesno("更新已下载", "更新包已校验完成。现在重启并安装？", parent=self):
+            self._launch_staged_update()
+
+    def _launch_staged_update(self):
+        staged = self._staged_update
+        if not staged:
+            return
+        try:
+            restart = [sys.executable, os.path.abspath(__file__)] + [a for a in sys.argv[1:] if a != "--dump"]
+            hub_updater.launch_apply(
+                stage_dir=staged["stage_dir"],
+                install_root=os.path.dirname(HERE),
+                backup_root=os.path.join(HUB_DATA, "updates", "backups"),
+                restart_argv=restart,
+            )
+        except Exception as e:  # noqa: BLE001
+            messagebox.showerror("无法安装更新", str(e), parent=self)
+            return
+        self.after(100, self._close)
 
     def _build_overview(self):
         f = self.ov = tk.Frame(self.main, bg="white")
