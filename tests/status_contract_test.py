@@ -46,6 +46,13 @@ def main():
     assert any("ISO 8601" in e for e in out["errors"]), out
     assert any("row_meta" in w for w in out["warnings"]), out
 
+    import json
+    example_path = os.path.join(ROOT, "hub", "hub_status.example.json")
+    with open(example_path, encoding="utf-8") as f:
+        example = json.load(f)
+    out = sc.validate_status(example)
+    assert out == {"errors": [], "warnings": []}, out
+
     print("status contract tests passed")
 
 
