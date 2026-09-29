@@ -10,6 +10,7 @@
 #include <QCryptographicHash>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDesktopServices>
 #include <QEvent>
 #include <QLabel>
 #include <QLocalServer>
@@ -48,6 +49,7 @@ QString concise_summary(const std::string& summary) {
 QtDesktopController::QtDesktopController(QtMainWindow& window, QObject* parent)
     : QObject(parent),
       window_(&window),
+      updates_(new QtUpdateService(this)),
       settings_(load_desktop_settings()) {}
 
 QtDesktopController::~QtDesktopController() {
@@ -129,6 +131,18 @@ bool QtDesktopController::install_system_tray(const QIcon& icon) {
     status_action_->setEnabled(false);
 
     menu->addSeparator();
+    update_action_ = menu->addAction(QStringLiteral("检查更新…"));
+    connect(update_action_, &QAction::triggered, this, [this] {
+        if (pending_update_ &&
+            updates_->install_mode() == QStringLiteral("release")) {
+            begin_update_install(*pending_update_);
+        } else if (pending_update_) {
+            open_pending_release_page();
+        } else {
+            check_for_updates(true);
+        }
+    });
+
     auto* settings_action = menu->addAction(QStringLiteral("设置…"));
     connect(settings_action, &QAction::triggered, this, [this] {
         show_settings_dialog();
@@ -171,6 +185,17 @@ void QtDesktopController::start(bool background_requested) {
             poll_project_notifications(false);
         });
         notification_timer_->start();
+
+        update_timer_ = new QTimer(this);
+        update_timer_->setInterval(6 * 60 * 60 * 1000);
+        connect(update_timer_, &QTimer::timeout, this, [this] {
+            check_for_updates(false);
+        });
+        update_timer_->start();
+
+        QTimer::singleShot(7000, this, [this] {
+            check_for_updates(false);
+        });
     }
 
     if (background_requested && tray_available()) {
@@ -191,6 +216,7 @@ void QtDesktopController::show_main_window() {
 void QtDesktopController::request_quit() {
     force_quit_ = true;
     if (notification_timer_) notification_timer_->stop();
+    if (update_timer_) update_timer_->stop();
     if (tray_) tray_->hide();
     QApplication::quit();
 }
@@ -299,6 +325,10 @@ void QtDesktopController::copy_diagnostics() {
     diagnostics += QStringLiteral("\ntray_available=%1")
                        .arg(tray_available() ? QStringLiteral("true")
                                              : QStringLiteral("false"));
+    diagnostics += QStringLiteral("\nupdate_install_mode=%1")
+                       .arg(updates_->install_mode());
+    diagnostics += QStringLiteral("\nupdate_install_root=%1")
+                       .arg(updates_->install_root());
 
     QApplication::clipboard()->setText(diagnostics);
 
@@ -428,6 +458,210 @@ void QtDesktopController::poll_project_notifications(bool baseline_only) {
 
     if (status_action_) status_action_->setText(status);
     tray_->setToolTip(QStringLiteral("Monitor Hub · %1").arg(status));
+}
+
+
+void QtDesktopController::open_pending_release_page() {
+    if (!pending_update_ || !pending_update_->page_url.isValid()) {
+        check_for_updates(true);
+        return;
+    }
+    QDesktopServices::openUrl(pending_update_->page_url);
+}
+
+void QtDesktopController::check_for_updates(bool interactive) {
+    if (!updates_ || update_busy_) {
+        if (interactive && update_busy_) {
+            QMessageBox::information(
+                window_,
+                QStringLiteral("Monitor Hub"),
+                QStringLiteral("更新操作正在进行中。"));
+        }
+        return;
+    }
+
+    if (update_action_) {
+        update_action_->setText(QStringLiteral("正在检查更新…"));
+        update_action_->setEnabled(false);
+    }
+
+    updates_->check_latest(
+        [this, interactive](QtUpdateCheck result, QString error) {
+            if (update_action_) {
+                update_action_->setEnabled(true);
+                update_action_->setText(QStringLiteral("检查更新…"));
+            }
+
+            if (!error.isEmpty()) {
+                if (interactive) {
+                    QMessageBox::warning(
+                        window_,
+                        QStringLiteral("Monitor Hub"),
+                        error);
+                }
+                return;
+            }
+
+            if (!result.release || !result.available) {
+                pending_update_.reset();
+                if (interactive) {
+                    QMessageBox::information(
+                        window_,
+                        QStringLiteral("Monitor Hub"),
+                        QStringLiteral("当前已是最新稳定版本（%1）。")
+                            .arg(result.current_version));
+                }
+                return;
+            }
+
+            pending_update_ = result.release;
+            const auto& release = *pending_update_;
+
+            if (result.install_mode == QStringLiteral("release")) {
+                if (update_action_) {
+                    update_action_->setText(
+                        QStringLiteral("安装更新 v%1…")
+                            .arg(release.version));
+                }
+
+                if (interactive) {
+                    const auto answer = QMessageBox::question(
+                        window_,
+                        QStringLiteral("Monitor Hub 更新"),
+                        QStringLiteral(
+                            "发现稳定版本 v%1。\n\n"
+                            "是否下载、校验并安装？安装时 Monitor Hub "
+                            "会退出，更新 helper 完成替换后会自动后台重启。")
+                            .arg(release.version),
+                        QMessageBox::Yes | QMessageBox::No,
+                        QMessageBox::Yes);
+                    if (answer == QMessageBox::Yes) {
+                        begin_update_install(release);
+                    }
+                } else if (tray_available() &&
+                           QSystemTrayIcon::supportsMessages()) {
+                    tray_->showMessage(
+                        QStringLiteral("Monitor Hub · 新版本可用"),
+                        QStringLiteral(
+                            "v%1 已发布。可从托盘菜单选择“安装更新 v%1…”。")
+                            .arg(release.version),
+                        QSystemTrayIcon::Information,
+                        6000);
+                }
+                return;
+            }
+
+            if (update_action_) {
+                update_action_->setText(
+                    QStringLiteral("新版本 v%1（打开 Release）")
+                        .arg(release.version));
+            }
+
+            if (interactive) {
+                QMessageBox box(window_);
+                box.setWindowTitle(QStringLiteral("Monitor Hub 更新"));
+                box.setIcon(QMessageBox::Information);
+                box.setText(
+                    QStringLiteral("发现稳定版本 v%1。").arg(release.version));
+                box.setInformativeText(
+                    result.install_mode == QStringLiteral("development")
+                        ? QStringLiteral(
+                              "当前是 Git 开发工作区。为避免覆盖正在进行的 "
+                              "PR/本地修改，自动 apply 已禁用。")
+                        : QStringLiteral(
+                              "当前目录不是受管 Release 安装，自动 apply 已禁用。"));
+                auto* open_button =
+                    box.addButton(QStringLiteral("打开 Release 页面"),
+                                  QMessageBox::ActionRole);
+                box.addButton(QMessageBox::Close);
+                box.exec();
+                if (box.clickedButton() == open_button) {
+                    open_pending_release_page();
+                }
+            } else if (tray_available() &&
+                       QSystemTrayIcon::supportsMessages()) {
+                tray_->showMessage(
+                    QStringLiteral("Monitor Hub · 新版本可用"),
+                    QStringLiteral(
+                        "v%1 已发布；当前是%2模式，不会自动覆盖。")
+                        .arg(
+                            release.version,
+                            result.install_mode == QStringLiteral("development")
+                                ? QStringLiteral("开发")
+                                : QStringLiteral("非受管")),
+                    QSystemTrayIcon::Information,
+                    6000);
+            }
+        });
+}
+
+void QtDesktopController::begin_update_install(
+    const QtUpdateRelease& release) {
+    if (!updates_ || update_busy_) return;
+
+    if (updates_->install_mode() != QStringLiteral("release")) {
+        open_pending_release_page();
+        return;
+    }
+
+    update_busy_ = true;
+    if (update_action_) {
+        update_action_->setEnabled(false);
+        update_action_->setText(
+            QStringLiteral("正在下载 v%1…").arg(release.version));
+    }
+
+    if (tray_available() && QSystemTrayIcon::supportsMessages()) {
+        tray_->showMessage(
+            QStringLiteral("Monitor Hub 更新"),
+            QStringLiteral("正在下载并校验 v%1…").arg(release.version),
+            QSystemTrayIcon::Information,
+            4000);
+    }
+
+    updates_->stage_release(
+        release,
+        [this, release](QString stage_dir, QString error) {
+            if (!error.isEmpty()) {
+                update_busy_ = false;
+                if (update_action_) {
+                    update_action_->setEnabled(true);
+                    update_action_->setText(
+                        QStringLiteral("安装更新 v%1…")
+                            .arg(release.version));
+                }
+                QMessageBox::warning(
+                    window_,
+                    QStringLiteral("Monitor Hub 更新"),
+                    error);
+                return;
+            }
+
+            if (update_action_) {
+                update_action_->setText(QStringLiteral("正在启动更新 helper…"));
+            }
+
+            QString launch_error;
+            if (!updates_->launch_apply(
+                    release,
+                    stage_dir,
+                    &launch_error)) {
+                update_busy_ = false;
+                if (update_action_) {
+                    update_action_->setEnabled(true);
+                    update_action_->setText(
+                        QStringLiteral("安装更新 v%1…")
+                            .arg(release.version));
+                }
+                QMessageBox::warning(
+                    window_,
+                    QStringLiteral("Monitor Hub 更新"),
+                    launch_error);
+                return;
+            }
+
+            request_quit();
+        });
 }
 
 bool QtDesktopController::eventFilter(QObject* watched, QEvent* event) {
