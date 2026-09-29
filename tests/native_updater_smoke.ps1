@@ -94,16 +94,21 @@ if ($devVersion -ne "DEVELOPMENT-MUST-STAY") {
     throw "development protection allowed a managed file mutation"
 }
 
-# Rollback injection: turn a managed DLL path into a directory so apply fails
-# after earlier manifest entries have already been replaced.
+# Rollback injection: mutate the release marker (an early managed file), then
+# make VERSION a directory so a later replacement fails. The old marker must
+# be restored after earlier files were already replaced.
 $rollbackInstall = Join-Path $TempRoot "install-rollback"
 $rollbackBackups = Join-Path $TempRoot "backups-rollback"
 Copy-Tree $StageDir $rollbackInstall
-Set-Content -LiteralPath (Join-Path $rollbackInstall "VERSION") -Value "ROLLBACK-MUST-RESTORE" -Encoding ascii
 
-$blockPath = Join-Path $rollbackInstall "bin\Qt6Core.dll"
+$markerPath = Join-Path $rollbackInstall ".monitor-hub-release.json"
+$marker = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
+$marker | Add-Member -NotePropertyName sentinel -NotePropertyValue "ROLLBACK-MUST-RESTORE" -Force
+$marker | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $markerPath -Encoding utf8
+
+$blockPath = Join-Path $rollbackInstall "VERSION"
 if (-not (Test-Path -LiteralPath $blockPath -PathType Leaf)) {
-    throw "Qt6Core.dll missing; rollback injection target unavailable"
+    throw "VERSION missing; rollback injection target unavailable"
 }
 Remove-Item -LiteralPath $blockPath -Force
 New-Item -ItemType Directory -Force -Path $blockPath | Out-Null
@@ -118,9 +123,9 @@ Invoke-Updater @(
     "--restart-arg", "exit"
 ) 1
 
-$rolledBack = (Get-Content (Join-Path $rollbackInstall "VERSION") -Raw).Trim()
-if ($rolledBack -ne "ROLLBACK-MUST-RESTORE") {
-    throw "rollback did not restore VERSION after injected apply failure"
+$rolledBackMarker = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
+if ($rolledBackMarker.sentinel -ne "ROLLBACK-MUST-RESTORE") {
+    throw "rollback did not restore the previously replaced release marker"
 }
 
 Write-Host "native updater smoke tests passed"
