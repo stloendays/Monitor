@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 #include <QUrl>
