@@ -83,3 +83,23 @@ The next read-only migration step covers monitors launched through the shared de
 - distinguish `running`, intentional `stopped`, normal `exit:0`, missing jobs, and unexpected `gone/exit:<code>` states.
 
 This phase is still read-only. It does not stop, restart, or recreate detached jobs.
+
+
+## Phase 4: legacy Markdown and takeover indexing
+
+This phase makes the C++ snapshot layer understand the existing Vanda/HPC monitor format instead of requiring every old project to migrate to `hub_status.json` first.
+
+Implemented:
+
+- parse the first Markdown status table and notes;
+- reproduce `done/run/queue/bad/other` row classification;
+- extract legacy “下次检查” text when the scheduler has no next-run time;
+- detect `ssh/remote monitor FAILED`;
+- read legacy attention files and correlate them with recent takeover activity;
+- honor legacy DONE marker files;
+- index detached Claude takeover jobs by prefix;
+- index `claude_takeover_<timestamp>.jsonl|md` files;
+- parse the final Claude stream-json `result` event;
+- surface friendly quota/login/service failure summaries.
+
+The adapter remains read-only. Existing Markdown monitor outputs do not need to change.
