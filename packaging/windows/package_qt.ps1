@@ -66,6 +66,16 @@ if (-not (Test-Path -LiteralPath $windeployqt)) {
     throw "windeployqt.exe not found: $windeployqt"
 }
 
+if (-not $env:VCINSTALLDIR) {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path -LiteralPath $vswhere) {
+        $vsInstall = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+        if ($vsInstall) {
+            $env:VCINSTALLDIR = (Join-Path $vsInstall "VC") + "\"
+        }
+    }
+}
+
 if (Test-Path -LiteralPath $out) {
     Remove-Item -LiteralPath $out -Recurse -Force
 }
@@ -93,9 +103,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "windeployqt failed with exit code $LASTEXITCODE"
 }
 
-& $qtExe --desktop-diagnostics
-if ($LASTEXITCODE -ne 0) {
-    throw "staged monitor_hub_qt.exe --desktop-diagnostics failed"
+foreach ($runtime in @("vcruntime140.dll", "msvcp140.dll")) {
+    if (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $qtExe) $runtime))) {
+        throw "windeployqt did not deploy required MSVC runtime: $runtime"
+    }
+}
+
+$diag = Start-Process -FilePath $qtExe -ArgumentList "--desktop-diagnostics" -Wait -PassThru
+if ($diag.ExitCode -ne 0) {
+    throw "staged monitor_hub_qt.exe --desktop-diagnostics failed with exit code $($diag.ExitCode)"
 }
 
 $cache = Join-Path $build "CMakeCache.txt"

@@ -43,10 +43,11 @@ jobs:
       - name: Desktop CLI smoke test
         shell: pwsh
         run: |
-          & ".\cpp\build-qt\Release\monitor_hub_qt.exe" --help
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ".\cpp\build-qt\Release\monitor_hub_qt.exe" --desktop-diagnostics
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = ".\cpp\build-qt\Release\monitor_hub_qt.exe"
+          $help = Start-Process -FilePath $exe -ArgumentList "--help" -Wait -PassThru
+          if ($help.ExitCode -ne 0) { throw "desktop --help failed: $($help.ExitCode)" }
+          $diag = Start-Process -FilePath $exe -ArgumentList "--desktop-diagnostics" -Wait -PassThru
+          if ($diag.ExitCode -ne 0) { throw "desktop diagnostics failed: $($diag.ExitCode)" }
 
       - name: Install NSIS
         shell: pwsh
@@ -77,15 +78,16 @@ jobs:
           if (-not (Test-Path (Join-Path $verify "payload\.monitor-hub-release.json"))) { throw "release marker missing" }
           $checksumPath = '.\dist\monitor-hub-windows-x64.zip.sha256'
           if (-not (Test-Path $checksumPath)) { throw "archive checksum missing" }
-          $expected = ((Get-Content $checksumPath -Raw).Trim() -split '\\s+')[0].ToLowerInvariant()
+          $expected = ((Get-Content $checksumPath -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
           $actual = (Get-FileHash -Algorithm SHA256 .\dist\monitor-hub-windows-x64.zip).Hash.ToLowerInvariant()
           if ($expected -ne $actual) { throw "archive checksum mismatch" }
 
       - name: Installed package smoke test
         shell: pwsh
         run: |
-          & ".\dist\stage\bin\monitor_hub_qt.exe" --desktop-diagnostics
-          if ($LASTEXITCODE -ne 0) { throw "staged diagnostics failed" }
+          $stagedExe = ".\dist\stage\bin\monitor_hub_qt.exe"
+          $staged = Start-Process -FilePath $stagedExe -ArgumentList "--desktop-diagnostics" -Wait -PassThru
+          if ($staged.ExitCode -ne 0) { throw "staged diagnostics failed: $($staged.ExitCode)" }
           $version = (Get-Content ".\dist\stage\VERSION" -Raw).Trim()
           $installer = ".\dist\Monitor-Hub-$version-win64-setup.exe"
           if (-not (Test-Path -LiteralPath $installer)) { throw "installer missing: $installer" }
@@ -95,8 +97,8 @@ jobs:
           if ($install.ExitCode -ne 0) { throw "installer failed: $($install.ExitCode)" }
           $installedExe = Join-Path $installDir "bin\monitor_hub_qt.exe"
           if (-not (Test-Path -LiteralPath $installedExe)) { throw "installed executable missing" }
-          & $installedExe --desktop-diagnostics
-          if ($LASTEXITCODE -ne 0) { throw "installed diagnostics failed" }
+          $installedDiag = Start-Process -FilePath $installedExe -ArgumentList "--desktop-diagnostics" -Wait -PassThru
+          if ($installedDiag.ExitCode -ne 0) { throw "installed diagnostics failed: $($installedDiag.ExitCode)" }
           $uninstaller = Join-Path $installDir "Uninstall.exe"
           $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "uninstaller failed: $($uninstall.ExitCode)" }
