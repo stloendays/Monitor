@@ -103,3 +103,18 @@ Implemented:
 - surface friendly quota/login/service failure summaries.
 
 The adapter remains read-only. Existing Markdown monitor outputs do not need to change.
+
+
+## Phase 5: QoI compatibility without mandatory project imports
+
+The C++ snapshot layer now supports the legacy `adapter: "qoi"` status shape.
+
+Key migration rule:
+
+- stored row values remain backward-compatible;
+- optional top-level `live.{job}` values override checkpoint/failure counts and newest checkpoint time;
+- task-level `workdir / log / result / params` become the common task-detail metadata;
+- the C++ hub never imports or executes a project Python module;
+- the Python hub uses `live.{job}` first and only falls back to `qoi_ext_monitor.scan()` for a RUNNING job whose live data is missing.
+
+The long-term target remains the generic `hub_status.json` contract. See `docs/QOI_ADAPTER.md` and `hub/qoi_status.example.json`.
