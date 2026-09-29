@@ -22,8 +22,9 @@ std::string utf8(const wchar_t* text) {
     if (!text) return {};
     const int n = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
     if (n <= 1) return {};
-    std::string out(static_cast<std::size_t>(n - 1), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text, -1, out.data(), n, nullptr, nullptr);
+    std::string out(static_cast<std::size_t>(n), '\0');
+    if (!WideCharToMultiByte(CP_UTF8, 0, text, -1, out.data(), n, nullptr, nullptr)) return {};
+    if (!out.empty() && out.back() == '\0') out.pop_back();
     return out;
 }
 
@@ -228,19 +229,15 @@ void probe_tasks(SystemInfo& out) {
 }
 
 std::int64_t variant_i64(const VARIANT& v) {
-    switch (v.vt) {
-        case VT_I1: return v.cVal;
-        case VT_UI1: return v.bVal;
-        case VT_I2: return v.iVal;
-        case VT_UI2: return v.uiVal;
-        case VT_I4:
-        case VT_INT: return v.lVal;
-        case VT_UI4:
-        case VT_UINT: return v.ulVal;
-        case VT_I8: return v.llVal;
-        case VT_UI8: return static_cast<std::int64_t>(v.ullVal);
-        default: return 0;
-    }
+    if (v.vt == VT_I1) return v.cVal;
+    if (v.vt == VT_UI1) return v.bVal;
+    if (v.vt == VT_I2) return v.iVal;
+    if (v.vt == VT_UI2) return v.uiVal;
+    if (v.vt == VT_I4 || v.vt == VT_INT) return v.lVal;
+    if (v.vt == VT_UI4 || v.vt == VT_UINT) return v.ulVal;
+    if (v.vt == VT_I8) return v.llVal;
+    if (v.vt == VT_UI8) return static_cast<std::int64_t>(v.ullVal);
+    return 0;
 }
 
 std::string variant_string(const VARIANT& v) {
