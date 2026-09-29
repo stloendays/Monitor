@@ -1467,12 +1467,28 @@ class Hub(tk.Tk):
                 longest = max([len(c)] + [len(r_[cols.index(c)]) for r_ in tb["rows"]]) if tb["rows"] else len(c)
                 self.pg_tree.heading(i, text=c)
                 self.pg_tree.column(i, width=min(420, max(80, 14 * longest)), anchor="w", stretch=True)
+        same_project = getattr(self, "_pg_project_id", None) == p["id"]
+        old_sel = self.pg_tree.selection()
+        old_iid = old_sel[0] if old_sel else self.pg_tree.focus()
+        old_task_id = self._progress_meta(old_iid).get("task_id") if same_project and old_iid else None
         self.pg_tree.delete(*self.pg_tree.get_children())
+        self._pg_project_id = p["id"]
         self._pg_meta = list(tb.get("row_meta") or [])
         if len(self._pg_meta) < len(tb["rows"]):
             self._pg_meta += [{} for _ in range(len(tb["rows"]) - len(self._pg_meta))]
         for i, (row, tag) in enumerate(zip(tb["rows"], tb["tags"])):
             self.pg_tree.insert("", "end", iid=str(i), values=row, tags=(tag,) if tag else ())
+        target_iid = None
+        if old_task_id:
+            target_iid = next((str(i) for i, meta in enumerate(self._pg_meta) if meta.get("task_id") == old_task_id), None)
+        if target_iid is None and same_project and old_iid and self.pg_tree.exists(old_iid):
+            target_iid = old_iid
+        if target_iid is None and tb["rows"]:
+            target_iid = "0"
+        if target_iid is not None:
+            self.pg_tree.selection_set(target_iid)
+            self.pg_tree.focus(target_iid)
+            self.pg_tree.see(target_iid)
         self.pg_tree.configure(height=max(3, min(18, len(tb["rows"]))))
         notes = [(e, None) for e in s.get("extras", []) if e]
         if s.get("notes"):
@@ -1545,22 +1561,71 @@ class Hub(tk.Tk):
         return meta if isinstance(meta, dict) else {}
 
     def _show_progress_task_meta(self):
-        meta = self._progress_meta()
-        lines = list(getattr(self, "_pg_base_notes", []))
-        if not meta:
-            self._set(self.pg_notes, lines)
-            return
+        sel = self.pg_tree.selection()
+        iid = sel[0] if sel else self.pg_tree.focus()
+        meta = self._progress_meta(iid)
+        values = list(self.pg_tree.item(iid, "values")) if iid and self.pg_tree.exists(iid) else []
+        row = dict(zip(self.pg_cols or [], values))
+        task = meta.get("task_id") or (str(values[0]) if values else "未选择任务")
+        status = next((str(v) for k, v in row.items() if k.lower() in ("status", "state") or "状态" in k), "")
+        sub = []
+        if status:
+            sub.append(status)
+        if meta.get("job_id") not in (None, ""):
+            sub.append("Job %s" % meta["job_id"])
+        if meta.get("host"):
+            sub.append(str(meta["host"]))
+        self.pg_task_title.configure(text=task)
+        self.pg_task_sub.configure(text="  ·  ".join(sub))
+
+        path = next((meta.get(k) for k in ("open_path", "path", "workdir") if meta.get(k)), "")
         detail = []
-        for key, label in (("task_id", "任务"), ("job_id", "作业号"), ("host", "主机"), ("script", "脚本"),
-                           ("command", "命令"), ("open_path", "路径"), ("log", "日志"), ("result", "结果")):
-            if meta.get(key):
-                detail.append("%s：%s" % (label, meta[key]))
-        params = meta.get("params")
-        if isinstance(params, dict) and params:
-            detail.append("参数：" + "；".join("%s=%s" % (k, v) for k, v in params.items()))
-        if detail:
-            lines += [("", None), ("任务详情：", "bold")] + [("  " + x, None) for x in detail]
-        self._set(self.pg_notes, lines)
+        if path:
+            detail.append("路径：%s" % path)
+        if meta.get("script"):
+            detail.append("脚本：%s" % meta["script"])
+        if meta.get("command"):
+            detail.append("命令：%s" % meta["command"])
+        if meta.get("log"):
+            detail.append("日志：%s" % meta["log"])
+        if meta.get("result"):
+            detail.append("结果：%s" % meta["result"])
+        self.pg_task_path.configure(text="\n".join(detail))
+
+        self.pg_param_tree.delete(*self.pg_param_tree.get_children())
+        params = meta.get("params") if isinstance(meta.get("params"), dict) else {}
+        for i, key in enumerate(sorted(params, key=lambda x: str(x).lower())):
+            value = params[key]
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            self.pg_param_tree.insert("", "end", iid=str(i), values=(key, value))
+
+        default_target = next((meta.get(k) for k in ("open_path", "path", "workdir", "log", "result")
+                               if meta.get(k) and os.path.exists(meta[k])), None)
+        self.pg_meta_btns["open"].configure(state="normal" if default_target else "disabled")
+        self.pg_meta_btns["log"].configure(state="normal" if meta.get("log") and os.path.exists(meta["log"]) else "disabled")
+        self.pg_meta_btns["result"].configure(state="normal" if meta.get("result") and os.path.exists(meta["result"]) else "disabled")
+        self.pg_meta_btns["copy"].configure(state="normal" if meta.get("command") else "disabled")
+
+    def _progress_meta_action(self, what):
+        meta = self._progress_meta()
+        if what == "copy":
+            command = meta.get("command")
+            if command:
+                self.clipboard_clear()
+                self.clipboard_append(str(command))
+            return
+        if what == "log":
+            target = meta.get("log")
+        elif what == "result":
+            target = meta.get("result")
+        else:
+            target = next((meta.get(k) for k in ("open_path", "path", "workdir", "log", "result")
+                           if meta.get(k) and os.path.exists(meta[k])), None)
+        if target and os.path.exists(target):
+            os.startfile(target)
+            return
+        messagebox.showinfo("任务文件", "当前任务没有可在本机打开的对应文件或目录。", parent=self)
 
     def _open_progress_task(self, event=None):
         iid = self.pg_tree.identify_row(event.y) if event is not None and hasattr(event, "y") else None
@@ -1572,22 +1637,8 @@ class Hub(tk.Tk):
             iid = sel[0] if sel else self.pg_tree.focus()
         if not iid:
             return
-        meta = self._progress_meta(iid)
-        target = next((meta.get(k) for k in ("open_path", "path", "workdir", "log", "result") if meta.get(k)), None)
-        if target and os.path.exists(target):
-            os.startfile(target)
-            return
-        detail = []
-        for key, label in (("task_id", "任务"), ("job_id", "作业号"), ("host", "主机"), ("script", "脚本"),
-                           ("command", "命令"), ("log", "日志"), ("result", "结果")):
-            if meta.get(key):
-                detail.append("%s：%s" % (label, meta[key]))
-        params = meta.get("params")
-        if isinstance(params, dict) and params:
-            detail.append("参数：" + "；".join("%s=%s" % (k, v) for k, v in params.items()))
-        messagebox.showinfo("任务详情", "\n".join(detail) if detail else
-                            "这个任务还没有提供可打开路径。请让监控在 hub_status.json 的 table.row_meta 中写入 open_path、log 或 result。",
-                            parent=self)
+        self._show_progress_task_meta()
+        self._progress_meta_action("open")
 
     def _open_key(self, key):
         p, _ = self._project()
