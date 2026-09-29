@@ -1077,8 +1077,11 @@ class Hub(tk.Tk):
         pgh.pack(fill="x", pady=(8, 0))
         info = self._info_button(pgh, "颜色：绿色 = 已完成，蓝色 = 运行中，棕色 = 排队中，红色 = 异常，黑色 = 其他。\n\n选中任务行会在下方显示 task_id、job_id、主机、脚本、命令和参数；双击或按 Enter 可打开任务目录、日志或结果文件。")
         info.pack(side="right")
-        box = tk.Frame(t1, bg="white")
-        box.pack(fill="both", expand=True, pady=(4, 0))
+        pgpan = ttk.PanedWindow(t1, orient="horizontal")
+        pgpan.pack(fill="both", expand=True, pady=(4, 0))
+        pgleft = tk.Frame(pgpan, bg="white")
+        box = tk.Frame(pgleft, bg="white")
+        box.pack(fill="both", expand=True)
         self.pg_tree = ttk.Treeview(box, show="headings")
         vs = ttk.Scrollbar(box, orient="vertical", command=self.pg_tree.yview)
         hs = ttk.Scrollbar(box, orient="horizontal", command=self.pg_tree.xview)
@@ -1093,8 +1096,44 @@ class Hub(tk.Tk):
         box.columnconfigure(0, weight=1)
         for tag, col in (("done", GREEN), ("bad", RED), ("run", BLUE), ("queue", BROWN), ("other", INK)):
             self.pg_tree.tag_configure(tag, foreground=col)
-        nf, self.pg_notes = self._textbox(t1, height=5)
+        nf, self.pg_notes = self._textbox(pgleft, height=5)
         nf.pack(fill="x", pady=(6, 0))
+
+        pgright = ttk.LabelFrame(pgpan, text="任务详情", padding=10)
+        self.pg_task_title = tk.Label(pgright, text="未选择任务", font=(UI, 13, "bold"), fg=INK, bg="white",
+                                      anchor="w", justify="left", wraplength=360)
+        self.pg_task_title.pack(fill="x")
+        self.pg_task_sub = tk.Label(pgright, text="", font=(UI, 10), fg=INK, bg="white",
+                                    anchor="w", justify="left", wraplength=360)
+        self.pg_task_sub.pack(fill="x", pady=(2, 0))
+        self.pg_task_path = tk.Label(pgright, text="", font=(MONO, 9), fg=INK, bg="white",
+                                     anchor="w", justify="left", wraplength=360)
+        self.pg_task_path.pack(fill="x", pady=(4, 6))
+
+        pgb = tk.Frame(pgright, bg="white")
+        pgb.pack(fill="x", pady=(0, 8))
+        self.pg_meta_btns = {}
+        for key, label, tip in (
+            ("open", "打开任务", "打开任务登记的 open_path / path / workdir；没有目录时会尝试日志或结果文件。"),
+            ("log", "日志", "打开当前任务登记的主要日志文件。"),
+            ("result", "结果", "打开当前任务登记的结果文件。"),
+            ("copy", "复制命令", "把当前任务登记的启动/提交命令复制到剪贴板，不会执行命令。"),
+        ):
+            cmd = (lambda k=key: self._progress_meta_action(k))
+            b = ttk.Button(pgb, text=label, command=cmd)
+            b.pack(side="left", padx=(0, 5))
+            self._tooltip(b, tip)
+            self.pg_meta_btns[key] = b
+
+        tk.Label(pgright, text="参数", font=(UI, 11, "bold"), fg=INK, bg="white").pack(anchor="w", pady=(2, 3))
+        self.pg_param_tree = ttk.Treeview(pgright, columns=("key", "value"), show="headings", height=9)
+        self.pg_param_tree.heading("key", text="参数")
+        self.pg_param_tree.heading("value", text="值")
+        self.pg_param_tree.column("key", width=145, minwidth=100, anchor="w", stretch=False)
+        self.pg_param_tree.column("value", width=210, minwidth=130, anchor="w", stretch=True)
+        self.pg_param_tree.pack(fill="both", expand=True)
+        pgpan.add(pgleft, weight=3)
+        pgpan.add(pgright, weight=1)
         # takeovers
         t2 = tk.Frame(self.nb, bg="white")
         self.nb.add(t2, text="后台处理记录")
