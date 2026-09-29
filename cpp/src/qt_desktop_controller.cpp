@@ -33,7 +33,7 @@ QString QtDesktopController::single_instance_server_name() const {
             .toHex()
             .left(16);
     return QStringLiteral("monitor-hub.qt.%1")
-        .arg(QString::fromLatin1(digest));
+        .arg(QString::fromLatin1(digest.constData(), digest.size()));
 }
 
 bool QtDesktopController::notify_existing_instance() const {
