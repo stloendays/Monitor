@@ -569,7 +569,7 @@ def adapt_generic(p, sysinfo, runner):
     row_meta = [m if isinstance(m, dict) else {} for m in (tb.get("row_meta") or [])] if isinstance(tb.get("row_meta"), list) else []
     row_meta = (row_meta + [{} for _ in rows])[:len(rows)]
     nxt = st.get("next")
-    notes = list(st.get("notes") or []) if isinstance(st.get("notes"), list) else []
+    notes = [str(x) for x in (st.get("notes") or [])] if isinstance(st.get("notes"), list) else []
     extras = [("状态协议提示：" + w) for w in issues["warnings"]]
     schema_error = "状态文件格式错误：" + "；".join(issues["errors"][:4]) if issues["errors"] else None
     monitor_error = st.get("error") if isinstance(st.get("error"), str) and st.get("error") else None
@@ -577,9 +577,9 @@ def adapt_generic(p, sysinfo, runner):
                 summary=(st.get("summary") if isinstance(st.get("summary"), str) else "") or count_summary(tags),
                 notes=notes, extras=extras, contract_issues=issues,
                 table=dict(cols=cols, rows=rows, tags=tags, row_meta=row_meta),
-                attention=list(st.get("attention") or []) if isinstance(st.get("attention"), list) else [],
+                attention=[str(x) for x in (st.get("attention") or [])] if isinstance(st.get("attention"), list) else [],
                 working=st.get("working") if isinstance(st.get("working"), str) and st.get("working") else None,
-                done=bool(st.get("done")) if isinstance(st.get("done"), bool) else False,
+                done=(bool(st.get("done")) if isinstance(st.get("done"), bool) else False) and not issues["errors"],
                 results=list(st.get("results") or []) if isinstance(st.get("results"), list) else [],
                 next=short_time(runner["next"]) if runner.get("next") else (short_time(nxt) if isinstance(nxt, str) and "T" in nxt else nxt),
                 error="；".join(x for x in (monitor_error, schema_error) if x) or None)
