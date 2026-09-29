@@ -249,6 +249,288 @@ array result_list(const object& p, const object& snap) {
     return out;
 }
 
+std::string tail_text_local(const fs::path& path, std::size_t nbytes = 200000) {
+    std::ifstream in(path, std::ios::binary);
+    if(!in)return {};
+    in.seekg(0,std::ios::end);
+    const auto size=in.tellg();
+    const auto start=size>static_cast<std::streamoff>(nbytes)?size-static_cast<std::streamoff>(nbytes):std::streamoff(0);
+    in.seekg(start);
+    std::string data((std::istreambuf_iterator<char>(in)),std::istreambuf_iterator<char>());
+    if(start>0){
+        const auto nl=data.find('\n');
+        if(nl!=std::string::npos)data.erase(0,nl+1);
+    }
+    if(data.rfind("\xEF\xBB\xBF",0)==0)data.erase(0,3);
+    return data;
+}
+
+std::string first_line(const std::string& text) {
+    auto s=trim(text);
+    const auto p=s.find_first_of("\r\n");
+    return p==std::string::npos?s:s.substr(0,p);
+}
+
+struct ClaudeResult {
+    bool found=false;
+    bool is_error=false;
+    std::string result;
+};
+
+ClaudeResult parse_claude_result(const std::string& text) {
+    ClaudeResult out;
+    std::istringstream in(text);
+    std::string line;
+    while(std::getline(in,line)){
+        line=trim(line);
+        if(line.empty()||line.front()!='{')continue;
+        boost::system::error_code ec;
+        auto v=json::parse(line,ec);
+        if(ec||!v.is_object())continue;
+        const auto& o=v.as_object();
+        if(str(o.if_contains("type"))!="result")continue;
+        out.found=true;
+        out.is_error=boolean(o.if_contains("is_error"));
+        out.result=str(o.if_contains("result"));
+    }
+    return out;
+}
+
+std::string friendly_error(std::string text) {
+    if(std::regex_search(text,std::regex(R"(session limit|usage limit|hit your limit)",std::regex::icase))){
+        const auto p=text.rfind("·");
+        return p==std::string::npos?"Claude 额度用完":"Claude 额度用完（"+trim(text.substr(p+std::string("·").size()))+"）";
+    }
+    if(std::regex_search(text,std::regex(R"(not logged in|please run /login|invalid api key)",std::regex::icase)))return "Claude 没有登录";
+    if(std::regex_search(text,std::regex(R"(api error|internal server error|overloaded)",std::regex::icase)))
+        return "Claude 服务出错（"+text.substr(0,std::min<std::size_t>(80,text.size()))+"）";
+    return text;
+}
+
+bool pid_alive(std::int64_t pid,const SystemInfo& system){
+    return std::any_of(system.procs.begin(),system.procs.end(),[&](const ProcessInfo& p){return p.pid==pid;});
+}
+
+std::optional<double> parse_stamp_time(const std::string& stamp){
+    if(stamp.size()!=13)return std::nullopt;
+    std::tm tm{};
+    std::istringstream in(stamp);
+    in>>std::get_time(&tm,"%Y%m%d_%H%M");
+    if(in.fail())return std::nullopt;
+    tm.tm_isdst=-1;
+    const auto t=std::mktime(&tm);
+    return t==-1?std::nullopt:std::optional<double>(static_cast<double>(t));
+}
+
+std::string stamp_label(const std::string& stamp){
+    if(stamp.size()!=13)return stamp;
+    return stamp.substr(4,2)+"-"+stamp.substr(6,2)+" "+stamp.substr(9,2)+":"+stamp.substr(11,2);
+}
+
+array detach_takeovers(const std::string& prefix,const SystemInfo& system,const RuntimePaths& paths){
+    struct Row{double time=0;object value;};
+    std::vector<Row> rows;
+    std::error_code ec;
+    if(!fs::is_directory(paths.job_root,ec))return {};
+    for(fs::directory_iterator it(paths.job_root,ec),end;it!=end&&!ec;it.increment(ec)){
+        std::error_code dec;if(!it->is_directory(dec))continue;
+        const auto name=it->path().filename().string();
+        if(name.rfind(prefix,0)!=0)continue;
+        const auto log=it->path()/"output.log";
+        const auto st=detach_state(name,system,paths);
+        const auto res=parse_claude_result(tail_text_local(log));
+        std::string state;
+        if(st&&*st=="running")state="running";
+        else if(res.found&&!res.is_error&&st&&*st=="exit:0")state="ok";
+        else state="failed";
+        auto summary=res.found?first_line(res.result):std::string{};
+        std::string error;
+        if(state=="failed"){
+            error=res.found&&res.is_error?friendly_error(trim(res.result)):
+                "进程退出（"+(st?*st:"不存在")+"），没有结果";
+        }
+        std::smatch m;
+        const bool has_stamp=std::regex_search(name,m,std::regex(R"(([0-9]{8})-([0-9]{4}))"));
+        object o;
+        o["key"]=name;
+        const auto ts=mtime_seconds(it->path()/"started").value_or(mtime_seconds(it->path()).value_or(0.0));
+        o["time"]=ts;
+        o["state"]=state;
+        o["error"]=error.substr(0,std::min<std::size_t>(160,error.size()));
+        o["summary"]=strip_md(error.empty()?summary:error).substr(0,200);
+        o["path"]=log.string();
+        o["kind"]="jsonl";
+        o["label"]=has_stamp?m[1].str().substr(4,2)+"-"+m[1].str().substr(6,2)+" "+m[2].str().substr(0,2)+":"+m[2].str().substr(2,2):name;
+        rows.push_back({ts,std::move(o)});
+    }
+    std::sort(rows.begin(),rows.end(),[](const Row& a,const Row& b){return a.time>b.time;});
+    array out;for(auto& r:rows)out.emplace_back(std::move(r.value));return out;
+}
+
+array glob_takeovers(const object& cfg,const SystemInfo& system){
+    const fs::path pattern=str(cfg.if_contains("pattern"));
+    const auto folder=pattern.parent_path();
+    struct Files{fs::path jsonl;fs::path md;};
+    std::map<std::string,Files> stamps;
+    std::error_code ec;
+    if(fs::is_directory(folder,ec)){
+        for(fs::directory_iterator it(folder,ec),end;it!=end&&!ec;it.increment(ec)){
+            if(!it->is_regular_file())continue;
+            std::smatch m;
+            const auto name=it->path().filename().string();
+            if(!std::regex_match(name,m,std::regex(R"(^claude_takeover_([0-9]{8}_[0-9]{4})\.(jsonl|md)$)")))continue;
+            auto& files=stamps[m[1].str()];
+            if(m[2].str()=="jsonl")files.jsonl=it->path();else files.md=it->path();
+        }
+    }
+    object last;
+    if(auto v=read_json(str(cfg.if_contains("last")));v&&v->is_object())last=v->as_object();
+    std::optional<std::int64_t> lock_pid;
+    const auto lock_path=fs::path(str(cfg.if_contains("lock")));
+    if(!lock_path.empty()&&fs::exists(lock_path)){
+        try{
+            std::istringstream in(read_text(lock_path));std::int64_t p=0;if(in>>p)lock_pid=p;
+        }catch(const std::exception&){}
+    }
+    const auto newest=stamps.empty()?std::string{}:stamps.rbegin()->first;
+    struct Row{double time=0;object value;};std::vector<Row> rows;
+    for(const auto& [stamp,files]:stamps){
+        const auto md=trim(read_text(files.md));
+        const auto res=files.jsonl.empty()?ClaudeResult{}:parse_claude_result(tail_text_local(files.jsonl));
+        std::string state;
+        if(stamp==newest&&lock_pid&&pid_alive(*lock_pid,system))state="running";
+        else if(res.found)state=res.is_error?"failed":"ok";
+        else if(str(last.if_contains("report"))=="claude_takeover_"+stamp+".md")state=boolean(last.if_contains("ok"))?"ok":"failed";
+        else state=md.empty()?"failed":"ok";
+        const auto summary=!md.empty()?first_line(md):(res.found?first_line(res.result):std::string{});
+        const auto error=state=="failed"&&res.found?friendly_error(trim(res.result)):std::string{};
+        const auto ts=parse_stamp_time(stamp).value_or(0.0);
+        object o;o["key"]=stamp;o["time"]=ts;o["state"]=state;o["error"]=error;
+        o["summary"]=strip_md(error.empty()?summary:error).substr(0,200);
+        const auto chosen=!files.jsonl.empty()?files.jsonl:files.md;
+        o["path"]=chosen.string();o["kind"]=files.jsonl.empty()?"md":"jsonl";o["label"]=stamp_label(stamp);
+        rows.push_back({ts,std::move(o)});
+    }
+    std::sort(rows.begin(),rows.end(),[](const Row& a,const Row& b){return a.time>b.time;});
+    array out;for(auto& r:rows)out.emplace_back(std::move(r.value));return out;
+}
+
+struct MarkdownTable {std::vector<std::string> cols;std::vector<std::vector<std::string>> rows;};
+struct MarkdownStatus {std::string title;std::string headline;std::vector<MarkdownTable> tables;std::vector<std::string> extras;std::vector<std::string> notes;};
+
+std::vector<std::string> split_table_cells(const std::string& line){
+    auto s=trim(line);
+    if(!s.empty()&&s.front()=='|')s.erase(s.begin());
+    if(!s.empty()&&s.back()=='|')s.pop_back();
+    std::vector<std::string> out;std::stringstream ss(s);std::string cell;
+    while(std::getline(ss,cell,'|'))out.push_back(trim(cell));
+    return out;
+}
+
+bool separator_row(const std::vector<std::string>& cells){
+    bool had=false;
+    const std::regex re(R"(^:?-{2,}:?$)");
+    for(const auto& c:cells){
+        if(c.empty())continue;
+        had=true;
+        if(!std::regex_match(c,re))return false;
+    }
+    return had;
+}
+
+MarkdownStatus parse_status_markdown(const std::string& text){
+    MarkdownStatus out;MarkdownTable* cur=nullptr;bool in_notes=false;
+    std::istringstream in(text);std::string line;
+    while(std::getline(in,line)){
+        auto s=trim(line);
+        if(!s.empty()&&s.front()=='|'){
+            auto cells=split_table_cells(s);
+            if(!cur){out.tables.push_back({cells,{}});cur=&out.tables.back();}
+            else if(!separator_row(cells)){
+                cells.resize(cur->cols.size());
+                cur->rows.push_back(std::move(cells));
+            }
+            continue;
+        }
+        cur=nullptr;
+        if(s.empty())continue;
+        if(s.rfind("# ",0)==0&&out.title.empty())out.title=trim(s.substr(2));
+        else if(s.rfind("**",0)==0&&s.find("备注")!=std::string::npos)in_notes=true;
+        else if(in_notes&&s.rfind("- ",0)==0)out.notes.push_back(strip_md(s.substr(2)));
+        else if(out.headline.empty())out.headline=strip_md(s);
+        else out.extras.push_back(strip_md(s));
+    }
+    return out;
+}
+
+object markdown_adapter(const object& p,const SystemInfo& system,const RunnerInfo& runner,const RuntimePaths& paths){
+    const fs::path path=str(p.if_contains("status_md"));
+    const auto text=read_text(path);
+    const auto ts=mtime_seconds(path);
+    const auto md=parse_status_markdown(text);
+    object snap;
+    snap["updated"]=ts?value(*ts):value(nullptr);
+    snap["headline"]=md.headline;
+    snap["notes"]=json_strings(md.notes);
+    snap["attention"]=array{};
+    object table;table["cols"]=array{};table["rows"]=array{};table["tags"]=array{};table["row_meta"]=array{};
+    std::vector<std::string> tags;
+    if(!md.tables.empty()){
+        const auto& tb=md.tables.front();
+        array cols;for(const auto& x:tb.cols)cols.emplace_back(x);
+        std::optional<std::size_t> si,pi;
+        for(std::size_t i=0;i<tb.cols.size();++i){if(tb.cols[i]=="状态")si=i;if(tb.cols[i]=="进度")pi=i;}
+        array rows;
+        for(const auto& r:tb.rows){
+            const auto status=si&&*si<r.size()?r[*si]:std::string{};
+            const auto progress=pi&&*pi<r.size()?r[*pi]:std::string{};
+            tags.push_back(classify_row(status,progress));
+            array row;for(const auto& cell:r)row.emplace_back(strip_md(cell));rows.emplace_back(std::move(row));
+        }
+        table["cols"]=std::move(cols);table["rows"]=std::move(rows);table["tags"]=json_strings(tags);
+        array meta;for(std::size_t i=0;i<tb.rows.size();++i)meta.emplace_back(object{});table["row_meta"]=std::move(meta);
+    }
+    snap["table"]=std::move(table);
+    snap["summary"]=count_summary(tags);
+    std::string md_next;
+    const std::regex next_re(R"(下次检查[:：]\s*(.+))");
+    array extras;
+    for(const auto& e:md.extras){
+        std::smatch m;if(md_next.empty()&&std::regex_search(e,m,next_re))md_next=trim(m[1].str());
+        if(e.rfind("下次检查",0)!=0)extras.emplace_back(e);
+    }
+    snap["next"]=runner.next?value(short_time(*runner.next)):(md_next.empty()?value(nullptr):value(md_next));
+    snap["extras"]=std::move(extras);
+    const auto tks=takeovers(p,system,paths);
+    const auto att_path=fs::path(str(p.if_contains("attention")));
+    const auto att_t=att_path.empty()?std::optional<double>{}:mtime_seconds(att_path);
+    const bool fresh=att_t&&ts&&*att_t>=*ts-120.0;
+    if(fresh){
+        std::vector<std::string> items;std::istringstream ain(read_text(att_path));std::string line;
+        while(std::getline(ain,line)){line=trim(line);if(!line.empty())items.push_back(line);}
+        const object* last_tk=!tks.empty()&&tks.front().is_object()?&tks.front().as_object():nullptr;
+        const double last_time=last_tk&&last_tk->if_contains("time")&&last_tk->at("time").is_double()?last_tk->at("time").as_double():0.0;
+        const bool handled=last_tk&&last_time>=*att_t-60.0;
+        bool running=false;for(const auto& x:tks)if(x.is_object()&&str(x.as_object().if_contains("state"))=="running")running=true;
+        const auto joined=join(items,"；");
+        if(running)snap["working"]="后台 Claude 正在处理："+joined;
+        else if(handled&&str(last_tk->if_contains("state"))=="ok"){
+            array a;a.emplace_back("后台 Claude 已处理过这些问题，结果需要你看一下（见“后台处理记录”）：");
+            for(const auto& x:items)a.emplace_back(x);snap["attention"]=std::move(a);
+        }else if(handled){
+            array a;a.emplace_back("后台 Claude 处理失败，需要你处理：");for(const auto& x:items)a.emplace_back(x);snap["attention"]=std::move(a);
+        }else snap["working"]="监控发现问题，等待后台处理："+joined;
+    }
+    if(text.find("ssh/remote monitor FAILED")!=std::string::npos){
+        snap["error"]="上次检查连不上服务器（ssh 失败）";
+        snap["headline"]="上次检查时连不上服务器，监控没有取到作业状态。";
+    }
+    const auto done_text=lower(trim(read_text(str(p.if_contains("done_file")))));
+    snap["done"]=done_text.rfind("done",0)==0;
+    snap["takeovers"]=tks;
+    return snap;
+}
+
 object generic_adapter(const object& p, const RunnerInfo& runner) {
     const fs::path path = str(p.if_contains("status_json"));
     object st;
@@ -484,11 +766,18 @@ RunnerInfo runner_info(const object& p, const SystemInfo& system, const RuntimeP
     x.error="C++ 尚未接入 runner.kind="+x.kind; return x;
 }
 
-json::array takeovers(const object&, const SystemInfo&, const RuntimePaths&) { return {}; }
+json::array takeovers(const object& p, const SystemInfo& system, const RuntimePaths& paths) {
+    const auto* cfg=obj(p.if_contains("takeovers"));
+    if(!cfg)return {};
+    const auto kind=str(cfg->if_contains("kind"));
+    if(kind=="detach")return detach_takeovers(str(cfg->if_contains("prefix")),system,paths);
+    if(kind=="glob")return glob_takeovers(*cfg,system);
+    return {};
+}
 
 json::object snapshot(const object& p, const SystemInfo& system, const RuntimePaths& paths) {
     const auto runner=runner_info(p,system,paths); const auto adapter=str(p.if_contains("adapter"),"runner_only"); object s;
-    if(adapter=="generic")s=generic_adapter(p,runner); else if(adapter=="setup")s=setup_adapter(paths); else if(adapter=="runner_only")s=runner_only_adapter(runner); else {s=runner_only_adapter(runner);s["error"]="C++ phase 1 尚未迁移 adapter："+adapter;}
+    if(adapter=="generic")s=generic_adapter(p,runner); else if(adapter=="markdown")s=markdown_adapter(p,system,runner,paths); else if(adapter=="setup")s=setup_adapter(paths); else if(adapter=="runner_only")s=runner_only_adapter(runner); else {s=runner_only_adapter(runner);s["error"]="C++ 尚未迁移 adapter："+adapter;}
     s["runner"]=runner_json(runner); s["results_list"]=result_list(p,s);
     std::optional<double> updated; if(const auto* v=s.if_contains("updated");v&&v->is_double())updated=v->as_double();
     const bool stale=updated&&runner.interval_min&&!runner.paused&&adapter!="setup"&&(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count()-*updated>(2**runner.interval_min+30)*60.0);
