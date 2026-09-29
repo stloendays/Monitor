@@ -239,6 +239,70 @@ int main() {
     assert(qs.at("summary").as_string() == "1/2 个作业已完成；fold2 53.5%，约 4.3 小时 进行中");
     assert(!qs.at("done").as_bool());
 
+    // Setup adapter: request/report/takeover/NEEDS_USER must become a real table row and attention item.
+    const auto req_dir = paths.hub_data / "requests";
+    fs::create_directories(req_dir);
+    const auto stamp = std::string("20260929-130000");
+    write_file(req_dir / (stamp + "_request.md"),
+               "【监控任务】\n项目名称：CeOx Phase B\n项目目录（本机路径）：C:/Research/CeOx\n");
+    write_file(req_dir / (stamp + "_report.md"),
+               "# 办理报告\n已创建监控脚本并完成第一轮检查。\nNEEDS_USER: 请选择 walltime 24h 或 48h\n");
+    const auto setup_job = paths.job_root / ("hub-setup-" + stamp);
+    fs::create_directories(setup_job);
+    write_file(setup_job / "output.log",
+               "{\"type\":\"result\",\"is_error\":false,\"result\":\"setup finished\"}\n");
+    write_file(setup_job / "exitcode", "0\n");
+    write_file(setup_job / "started", "started\n");
+
+    json::object sp;
+    sp["id"] = "hub-setup";
+    sp["name"] = "新任务办理";
+    sp["adapter"] = "setup";
+    json::object sr;
+    sr["kind"] = "none";
+    sp["runner"] = sr;
+    sp["runner_text"] = "fixture";
+    const auto ss = snapshot(sp, SystemInfo{}, paths);
+    assert(ss.at("health").as_string() == "attention");
+    assert(ss.at("summary").as_string() == "1 个请求");
+    assert(ss.at("table").as_object().at("rows").as_array().size() == 1);
+    assert(ss.at("table").as_object().at("rows").as_array()[0].as_array()[1].as_string() == "CeOx Phase B");
+    assert(ss.at("table").as_object().at("rows").as_array()[0].as_array()[2].as_string() == "办好了，有事要你定");
+    assert(ss.at("table").as_object().at("tags").as_array()[0].as_string() == "bad");
+    assert(ss.at("attention").as_array().size() == 1);
+    assert(std::string(ss.at("attention").as_array()[0].as_string()).find("walltime") != std::string::npos);
+    assert(ss.at("takeovers").as_array().size() == 1);
+    assert(ss.at("table").as_object().at("row_meta").as_array()[0].as_object().at("result").as_string() ==
+           (req_dir / (stamp + "_report.md")).string());
+
+    // results_glob: matched files should appear alongside explicitly registered results.
+    const auto results_dir = root / "results";
+    fs::create_directories(results_dir);
+    write_file(results_dir / "a.md", "# A\n");
+    write_file(results_dir / "b.md", "# B\n");
+    write_file(results_dir / "ignore.txt", "x\n");
+    json::object rp;
+    rp["id"] = "results-demo";
+    rp["name"] = "results-demo";
+    rp["adapter"] = "runner_only";
+    json::object rr2;
+    rr2["kind"] = "none";
+    rp["runner"] = rr2;
+    rp["runner_text"] = "fixture";
+    json::array registered;
+    json::object explicit_result;
+    explicit_result["label"] = "显式结果";
+    explicit_result["path"] = (root / "explicit.md").string();
+    registered.emplace_back(std::move(explicit_result));
+    rp["results"] = std::move(registered);
+    json::array globs;
+    globs.emplace_back((results_dir / "*.md").string());
+    rp["results_glob"] = std::move(globs);
+    const auto rs = snapshot(rp, SystemInfo{}, paths);
+    assert(rs.at("results_list").as_array().size() == 3);
+    assert(rs.at("results_list").as_array()[1].as_array()[0].as_string() == "a.md");
+    assert(rs.at("results_list").as_array()[2].as_array()[0].as_string() == "b.md");
+
     fs::remove_all(root);
     std::cout << "core tests passed\n";
     return 0;
