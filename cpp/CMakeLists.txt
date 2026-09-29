@@ -32,7 +32,7 @@ target_link_libraries(monitor_hub_cli PRIVATE monitor_hub_core)
 option(MONITOR_HUB_BUILD_QT "Build the Qt 6 desktop UI" OFF)
 if(MONITOR_HUB_BUILD_QT)
     find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
-    add_executable(monitor_hub_qt WIN32
+    qt_add_executable(monitor_hub_qt WIN32
         src/qt_main.cpp
         src/qt_main_window.cpp
     )
