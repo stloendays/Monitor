@@ -93,19 +93,20 @@ if ($LASTEXITCODE -ne 0) {
     throw "windeployqt failed with exit code $LASTEXITCODE"
 }
 
-$diagnostics = & $qtExe --desktop-diagnostics
+& $qtExe --desktop-diagnostics
 if ($LASTEXITCODE -ne 0) {
     throw "staged monitor_hub_qt.exe --desktop-diagnostics failed"
 }
-$versionLine = $diagnostics | Where-Object { $_ -match '^version=' } | Select-Object -First 1
-if (-not $versionLine) {
-    throw "desktop diagnostics did not report version"
+
+$cache = Join-Path $build "CMakeCache.txt"
+$versionMatch = Select-String -LiteralPath $cache -Pattern '^CMAKE_PROJECT_VERSION:STATIC=(.+)$' | Select-Object -First 1
+if (-not $versionMatch) {
+    throw "CMake cache did not report CMAKE_PROJECT_VERSION"
 }
-$version = ($versionLine -replace '^version=', '').Trim()
-if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+$version = $versionMatch.Matches[0].Groups[1].Value.Trim()
+if ($version -notmatch '^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$') {
     throw "invalid staged desktop version: $version"
 }
-
 Set-Content -LiteralPath (Join-Path $stage "VERSION") -Value $version -Encoding ascii
 
 $releaseMarker = [ordered]@{
