@@ -517,7 +517,7 @@ def adapt_qoi(p, sysinfo, runner):
             except ValueError:
                 newest = None
         live[name] = (int(item.get("checkpoints") or 0), int(item.get("failures") or 0), newest or 0)
-    missing_live = {r.get("job") for r in rows if isinstance(r, dict) and r.get("job")} - set(live)
+    missing_live = {r.get("job") for r in rows if isinstance(r, dict) and r.get("job") and str(r.get("status", "")).startswith("RUNNING")} - set(live)
     if missing_live:
         try:
             mdir = os.path.dirname(p.get("monitor_script") or "")
