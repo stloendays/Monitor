@@ -33,7 +33,7 @@ function Find-MakeNsis {
     if ($cmd) { return $cmd.Source }
 
     foreach ($candidate in @(
-        "$env:ProgramFiles(x86)\NSIS\makensis.exe",
+        "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
         "$env:ProgramFiles\NSIS\makensis.exe",
         "C:\ProgramData\chocolatey\bin\makensis.exe"
     )) {
