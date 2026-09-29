@@ -79,6 +79,11 @@ std::string join(const std::vector<std::string>& xs, const std::string& sep, std
 
 ContractIssues validate_status_contract(const object& st) {
     ContractIssues out;
+    if (const auto* schema = st.if_contains("schema_version")) {
+        const bool ok = (schema->is_int64() && schema->as_int64() >= 1) ||
+                        (schema->is_uint64() && schema->as_uint64() >= 1);
+        if (!ok) out.errors.push_back("schema_version 必须是 >= 1 的整数");
+    }
     const auto* updated = st.if_contains("updated");
     if (!updated || !updated->is_string() || str(updated).empty() || !parse_iso_local_seconds(str(updated)))
         out.errors.push_back("updated 必须是有效 ISO 8601 字符串");
