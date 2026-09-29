@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import claude_stream as cs  # noqa: E402
 import naming as nm  # noqa: E402
+import status_contract as contract  # noqa: E402
 
 # MONITOR_HUB_REGISTRY / MONITOR_HUB_DATA point the hub at other data (demo mode: tests/demo/make_demo.py);
 # MONITOR_HUB_NO_DISCOVERY=1 hides the machine's unregistered monitors.
@@ -552,23 +553,36 @@ def adapt_qoi(p, sysinfo, runner):
 
 def adapt_generic(p, sysinfo, runner):
     """hub_status.json written by monitors set up under README section 9."""
-    st = read_json(p["status_json"]) or {}
+    raw = read_json(p["status_json"])
+    st = raw if isinstance(raw, dict) else {}
+    issues = contract.validate_status(raw)
     try:
         ts = dt.datetime.fromisoformat(st["updated"]).timestamp()
     except (KeyError, ValueError, TypeError):
         ts = mtime(p["status_json"])
-    tb = st.get("table") or {}
-    cols, rows = list(tb.get("cols") or []), [[str(c) for c in r] for r in (tb.get("rows") or [])]
-    tags = list(tb.get("tags") or [])
+    tb = st.get("table") if isinstance(st.get("table"), dict) else {}
+    raw_rows = tb.get("rows") if isinstance(tb.get("rows"), list) else []
+    cols = list(tb.get("cols") or []) if isinstance(tb.get("cols"), list) else []
+    rows = [[str(c) for c in r] for r in raw_rows if isinstance(r, list)]
+    tags = list(tb.get("tags") or []) if isinstance(tb.get("tags"), list) else []
     tags = (tags + [""] * len(rows))[:len(rows)]
-    row_meta = [m if isinstance(m, dict) else {} for m in (tb.get("row_meta") or [])]
+    row_meta = [m if isinstance(m, dict) else {} for m in (tb.get("row_meta") or [])] if isinstance(tb.get("row_meta"), list) else []
     row_meta = (row_meta + [{} for _ in rows])[:len(rows)]
     nxt = st.get("next")
-    snap = dict(updated=ts, headline=st.get("headline", ""), summary=st.get("summary") or count_summary(tags), notes=list(st.get("notes") or []),
-                extras=[], table=dict(cols=cols, rows=rows, tags=tags, row_meta=row_meta), attention=list(st.get("attention") or []),
-                working=st.get("working") or None, done=bool(st.get("done")), results=list(st.get("results") or []),
-                next=short_time(runner["next"]) if runner.get("next") else (short_time(nxt) if nxt and "T" in str(nxt) else nxt),
-                error=st.get("error") or None)
+    notes = list(st.get("notes") or []) if isinstance(st.get("notes"), list) else []
+    extras = [("状态协议提示：" + w) for w in issues["warnings"]]
+    schema_error = "状态文件格式错误：" + "；".join(issues["errors"][:4]) if issues["errors"] else None
+    monitor_error = st.get("error") if isinstance(st.get("error"), str) and st.get("error") else None
+    snap = dict(updated=ts, headline=st.get("headline", "") if isinstance(st.get("headline"), str) else "",
+                summary=(st.get("summary") if isinstance(st.get("summary"), str) else "") or count_summary(tags),
+                notes=notes, extras=extras, contract_issues=issues,
+                table=dict(cols=cols, rows=rows, tags=tags, row_meta=row_meta),
+                attention=list(st.get("attention") or []) if isinstance(st.get("attention"), list) else [],
+                working=st.get("working") if isinstance(st.get("working"), str) and st.get("working") else None,
+                done=bool(st.get("done")) if isinstance(st.get("done"), bool) else False,
+                results=list(st.get("results") or []) if isinstance(st.get("results"), list) else [],
+                next=short_time(runner["next"]) if runner.get("next") else (short_time(nxt) if isinstance(nxt, str) and "T" in nxt else nxt),
+                error="；".join(x for x in (monitor_error, schema_error) if x) or None)
     snap["takeovers"] = takeovers(p, sysinfo)
     return snap
 
