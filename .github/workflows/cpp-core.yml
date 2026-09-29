@@ -5,10 +5,16 @@ on:
     branches: [main, cpp-migration-phase1]
     paths:
       - 'cpp/**'
+      - 'hub/**'
+      - 'tests/**'
+      - 'docs/MONITOR_NAMING.md'
       - '.github/workflows/cpp-core.yml'
   pull_request:
     paths:
       - 'cpp/**'
+      - 'hub/**'
+      - 'tests/**'
+      - 'docs/MONITOR_NAMING.md'
       - '.github/workflows/cpp-core.yml'
 
 jobs:
@@ -19,6 +25,11 @@ jobs:
       - uses: lukka/run-vcpkg@v11
         with:
           vcpkgJsonGlob: cpp/vcpkg.json
+      - name: Python contract checks
+        shell: pwsh
+        run: |
+          python -m py_compile hub/monitor_hub.py hub/naming.py tests/demo/make_demo.py tests/naming_test.py
+          python tests/naming_test.py
       - name: Configure
         shell: pwsh
         run: cmake -S cpp -B cpp/build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
