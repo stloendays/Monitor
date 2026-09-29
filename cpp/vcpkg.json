@@ -3,5 +3,6 @@
   "version-string": "0.1.0",
   "dependencies": [
     "boost-json"
-  ]
+  ],
+  "builtin-baseline": "58845ed63eb19aff55e896ea1f5d51f2a0df5b66"
 }
