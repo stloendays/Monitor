@@ -42,7 +42,7 @@ def transcript(path, steps, final, is_error=False, minutes=3.2, cost=0.41):
 
 
 def status(folder, **kw):
-    write(os.path.join(folder, "hub_status.json"), json.dumps(dict(updated=iso(4), error="", **kw), ensure_ascii=False, indent=1))
+    write(os.path.join(folder, "hub_status.json"), json.dumps(dict(schema_version=1, updated=iso(4), error="", **kw), ensure_ascii=False, indent=1))
 
 
 def main():
