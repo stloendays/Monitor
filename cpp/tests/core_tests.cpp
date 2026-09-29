@@ -66,6 +66,13 @@ int main() {
     const auto done = snapshot(p, sys, paths);
     assert(done.at("health").as_string() == "done");
 
+    write_file(status,
+        R"({"updated":"bad-time","headline":"","done":false,"table":{"cols":["任务","状态"],"rows":[["a"]],"tags":["run"],"row_meta":[{"task_id":"a"},{"task_id":"a"}]},"attention":[],"notes":[],"error":""})");
+    const auto invalid = snapshot(p, sys, paths);
+    assert(invalid.at("health").as_string() == "error");
+    assert(std::string(invalid.at("problem").as_string()).find("状态文件格式错误") != std::string::npos);
+    assert(!invalid.at("extras").as_array().empty());
+
     fs::remove_all(root);
     std::cout << "core tests passed\n";
     return 0;
