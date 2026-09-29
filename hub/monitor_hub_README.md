@@ -212,6 +212,8 @@
 ```
 
 - `tags` 每行一个：`done` 已完成、`run` 运行中、`queue` 排队、`bad` 异常、`other` 不归本监控管、空字符串 = 其他。
+- `row_meta` 可选，和 `rows` 一一对应；用于任务下钻。推荐写 `task_id`、`job_id`、`host`、`open_path`、`log`、`result`、`script`、`command`、`params`。总台双击进度行时优先打开 `open_path`，然后依次尝试 `path / workdir / log / result`。
+- 新脚本统一按 `monitor__<project>__<scope>__<interval>.py` 命名，定时任务 / 后台作业按 `<project>__monitor__<scope>__<interval>` 命名；完整规则见 `docs/MONITOR_NAMING.md`。
 - `attention` 只放**需要用户决定**的事（写成用户能直接看懂的中文）；后台 Claude 正在处理的写在 `working`。
 - `error` 只放监控自身的故障（如 ssh 连不上）；它不是计算失败。
 - `done` 为 true 表示全部完成，总台显示「✔ 已完成」。
