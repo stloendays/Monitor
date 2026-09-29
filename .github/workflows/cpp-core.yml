@@ -1,0 +1,28 @@
+name: C++ core
+
+on:
+  push:
+    branches: [main, cpp-migration-phase1]
+    paths:
+      - 'cpp/**'
+      - '.github/workflows/cpp-core.yml'
+  pull_request:
+    paths:
+      - 'cpp/**'
+      - '.github/workflows/cpp-core.yml'
+
+jobs:
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: cpp/vcpkg.json
+      - name: Configure
+        shell: pwsh
+        run: cmake -S cpp -B cpp/build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+      - name: Build
+        run: cmake --build cpp/build --config Release
+      - name: Test
+        run: ctest --test-dir cpp/build -C Release --output-on-failure
