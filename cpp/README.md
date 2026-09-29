@@ -69,3 +69,17 @@ Examples:
 ```
 
 CI runs `--probe-system` on a Windows runner after the MSVC build and CTest. A non-empty probe error fails the job.
+
+
+## Phase 3: detached monitor discovery and state
+
+The next read-only migration step covers monitors launched through the shared detached-job directory:
+
+- discover unregistered job directories whose names contain `monitor`;
+- parse canonical names such as `demo__monitor__local__15m`;
+- infer project/scope/check interval for the runner-only view;
+- read `pid` and `exitcode` files;
+- verify a live PID against the probed process command line and the detached job directory;
+- distinguish `running`, intentional `stopped`, normal `exit:0`, missing jobs, and unexpected `gone/exit:<code>` states.
+
+This phase is still read-only. It does not stop, restart, or recreate detached jobs.

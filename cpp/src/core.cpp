@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
@@ -61,6 +62,71 @@ std::string trim(std::string s) {
 std::string lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
+}
+
+std::string pathish(std::string s) {
+    s = lower(std::move(s));
+    std::replace(s.begin(), s.end(), '\\', '/');
+    while (s.find("//") != std::string::npos) s = std::regex_replace(s, std::regex("//+"), "/");
+    return s;
+}
+
+struct MonitorIdentity {
+    bool canonical = false;
+    std::string project;
+    std::string scope;
+    std::optional<int> interval_min;
+    std::string display_name;
+};
+
+std::optional<int> interval_token_minutes(const std::string& token) {
+    std::smatch m;
+    if (!std::regex_match(token, m, std::regex(R"(^([0-9]+)([mhd])$)", std::regex::icase))) return std::nullopt;
+    const int n = std::stoi(m[1].str());
+    const auto unit = static_cast<char>(std::tolower(static_cast<unsigned char>(m[2].str()[0])));
+    return n * (unit == 'm' ? 1 : unit == 'h' ? 60 : 1440);
+}
+
+MonitorIdentity monitor_identity(const std::string& name, const std::string& action = {}) {
+    static const std::regex runner_re(
+        R"(^([a-z0-9][a-z0-9-]*)__monitor__([a-z0-9][a-z0-9-]*)__([0-9]+[mhd])$)",
+        std::regex::icase);
+    static const std::regex script_re(
+        R"(monitor__([a-z0-9][a-z0-9-]*)__([a-z0-9][a-z0-9-]*)__([0-9]+[mhd])\.py)",
+        std::regex::icase);
+    std::smatch m;
+    if (!std::regex_match(name, m, runner_re) && !std::regex_search(action, m, script_re)) return {};
+    MonitorIdentity out;
+    out.canonical = true;
+    out.project = lower(m[1].str());
+    out.scope = lower(m[2].str());
+    out.interval_min = interval_token_minutes(lower(m[3].str()));
+    out.display_name = out.project + " · " + out.scope + " monitor";
+    return out;
+}
+
+std::optional<std::string> detach_state(const std::string& name, const SystemInfo& system, const RuntimePaths& paths) {
+    const fs::path dir = paths.job_root / name;
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) return std::nullopt;
+
+    const auto exit_text = trim(read_text(dir / "exitcode"));
+    if (!exit_text.empty()) return "exit:" + exit_text;
+
+    std::int64_t pid = 0;
+    try {
+        const auto pid_text = trim(read_text(dir / "pid"));
+        if (pid_text.empty()) return std::string("gone");
+        pid = std::stoll(pid_text);
+    } catch (const std::exception&) {
+        return std::string("gone");
+    }
+
+    const auto needle = pathish(dir.lexically_normal().string());
+    for (const auto& p : system.procs) {
+        if (p.pid == pid && pathish(p.cmd).find(needle) != std::string::npos) return std::string("running");
+    }
+    return std::string("gone");
 }
 
 struct ContractIssues {
@@ -392,7 +458,7 @@ json::object system_info_json(const SystemInfo& system) {
     return out;
 }
 
-RunnerInfo runner_info(const object& p, const SystemInfo& system, const RuntimePaths&) {
+RunnerInfo runner_info(const object& p, const SystemInfo& system, const RuntimePaths& paths) {
     RunnerInfo x; const auto* r=obj(p.if_contains("runner")); if(!r)return x; x.kind=str(r->if_contains("kind")); x.name=str(r->if_contains("name")); x.interval_min=integer(r->if_contains("interval_min"));
     if(x.kind=="none"){x.exists=true;x.text=str(p.if_contains("runner_text"));return x;}
     if(x.kind=="schtask"){
@@ -401,7 +467,21 @@ RunnerInfo runner_info(const object& p, const SystemInfo& system, const RuntimeP
         std::string rs=t.result==0?"成功":t.result==267009?"正在运行":t.result==267011?"还没运行过":"出错"; if(rs=="出错")x.error="定时任务上次运行出错";
         x.text="Windows 定时任务 "+x.name+"，"+(every(x.interval_min).empty()?"按计划":every(x.interval_min))+" · 上次运行 "+short_time(t.last)+"（"+rs+"）· "+(x.paused?"已停用":"下次 "+short_time(t.next)); return x;
     }
-    x.error="C++ phase 1 尚未接入 runner.kind="+x.kind; return x;
+    if(x.kind=="detach"){
+        const auto st=detach_state(x.name,system,paths);
+        x.exists=st.has_value();
+        x.running=st&&*st=="running";
+        x.paused=st&&(*st=="exit:stopped"||*st=="exit:0");
+        if(!st)x.error="找不到后台作业 "+x.name;
+        else if(*st!="running"&&*st!="exit:stopped"&&*st!="exit:0")x.error="监控进程意外退出（"+*st+"）";
+        std::string state_text;
+        if(!st)state_text="不存在";
+        else if(*st=="running")state_text="运行中";
+        else state_text="没在运行（"+*st+"）";
+        x.text="后台作业 "+x.name+"，"+every(x.interval_min)+" · "+state_text;
+        return x;
+    }
+    x.error="C++ 尚未接入 runner.kind="+x.kind; return x;
 }
 
 json::array takeovers(const object&, const SystemInfo&, const RuntimePaths&) { return {}; }
@@ -421,7 +501,29 @@ std::vector<object> load_projects(const SystemInfo& system, const RuntimePaths& 
     std::vector<object> out; auto reg=read_json(paths.registry); if(reg&&reg->is_object())if(const auto* a=arr(reg->as_object().if_contains("projects")))for(const auto& x:*a)if(x.is_object()&&!str(x.as_object().if_contains("id")).empty())out.push_back(x.as_object());
     object setup; setup["id"]="hub-setup";setup["name"]="新任务办理";setup["area"]="交给后台 Claude 设置的新监控";setup["adapter"]="setup";object r;r["kind"]="none";setup["runner"]=r;setup["runner_text"]="点左下角“新建监控任务”提交；每个请求由一个后台 Claude 办理";setup["dir"]=(paths.hub_data/"requests").string();setup["builtin"]=true;out.push_back(std::move(setup));
     if(!paths.discovery)return out;
-    for(const auto& [name,t]:system.tasks){bool known=false;for(const auto& p:out)if(const auto* pr=obj(p.if_contains("runner"));pr&&str(pr->if_contains("kind"))=="schtask"&&str(pr->if_contains("name"))==name)known=true;if(known)continue;object p;p["id"]="task:"+name;p["name"]=name;p["area"]="其他监控 · 定时任务";p["adapter"]="runner_only";object rr;rr["kind"]="schtask";rr["name"]=name;p["runner"]=rr;p["action"]=t.action;p["unregistered"]=true;out.push_back(std::move(p));}
+
+    for(const auto& [name,t]:system.tasks){
+        bool known=false;for(const auto& p:out)if(const auto* pr=obj(p.if_contains("runner"));pr&&str(pr->if_contains("kind"))=="schtask"&&str(pr->if_contains("name"))==name)known=true;
+        if(known)continue;
+        const auto id=monitor_identity(name,t.action);
+        object p;p["id"]="task:"+name;p["name"]=id.canonical?id.display_name:name;p["area"]="其他监控 · 定时任务"+(id.scope.empty()?"":" · "+id.scope);p["adapter"]="runner_only";
+        object rr;rr["kind"]="schtask";rr["name"]=name;if(id.interval_min)rr["interval_min"]=*id.interval_min;p["runner"]=rr;p["action"]=t.action;p["unregistered"]=true;out.push_back(std::move(p));
+    }
+
+    std::set<std::string> known_jobs;
+    for(const auto& p:out)if(const auto* pr=obj(p.if_contains("runner"));pr&&str(pr->if_contains("kind"))=="detach")known_jobs.insert(str(pr->if_contains("name")));
+    std::error_code ec;
+    if(fs::is_directory(paths.job_root,ec)){
+        for(fs::directory_iterator it(paths.job_root,ec),end;it!=end&&!ec;it.increment(ec)){
+            std::error_code dec;if(!it->is_directory(dec))continue;
+            const auto name=it->path().filename().string();
+            if(lower(name).find("monitor")==std::string::npos||known_jobs.count(name))continue;
+            auto action=read_text(it->path()/"run.ps1");if(action.size()>1200)action=action.substr(action.size()-1200);
+            const auto id=monitor_identity(name,action);
+            object p;p["id"]="job:"+name;p["name"]=id.canonical?id.display_name:name;p["area"]="其他监控 · 后台作业"+(id.scope.empty()?"":" · "+id.scope);p["adapter"]="runner_only";
+            object rr;rr["kind"]="detach";rr["name"]=name;if(id.interval_min)rr["interval_min"]=*id.interval_min;p["runner"]=rr;p["action"]=action;p["unregistered"]=true;out.push_back(std::move(p));
+        }
+    }
     return out;
 }
 

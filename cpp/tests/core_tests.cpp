@@ -1,6 +1,7 @@
 #include "monitor_hub/core.hpp"
 
 #include <boost/json.hpp>
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -85,6 +86,58 @@ int main() {
     assert(invalid.at("health").as_string() == "error");
     assert(std::string(invalid.at("problem").as_string()).find("状态文件格式错误") != std::string::npos);
     assert(!invalid.at("extras").as_array().empty());
+
+    // Detached monitor state: pid + command line must both identify the job.
+    paths.job_root = root / "jobs";
+    const auto job_name = std::string("demo__monitor__local__15m");
+    const auto job_dir = paths.job_root / job_name;
+    fs::create_directories(job_dir);
+    write_file(job_dir / "pid", "4321\n");
+    SystemInfo detsys;
+    detsys.procs.push_back(ProcessInfo{4321, "python.exe", "python " + (job_dir / "worker.py").string()});
+
+    json::object dp;
+    dp["id"] = "detach-demo";
+    dp["name"] = "detach-demo";
+    dp["adapter"] = "runner_only";
+    json::object dr;
+    dr["kind"] = "detach";
+    dr["name"] = job_name;
+    dr["interval_min"] = 15;
+    dp["runner"] = dr;
+
+    auto dri = runner_info(dp, detsys, paths);
+    assert(dri.exists && dri.running && !dri.paused && !dri.error);
+
+    detsys.procs.clear();
+    dri = runner_info(dp, detsys, paths);
+    assert(dri.exists && !dri.running && dri.error);
+    assert(dri.error->find("gone") != std::string::npos);
+
+    write_file(job_dir / "exitcode", "stopped\n");
+    dri = runner_info(dp, detsys, paths);
+    assert(dri.exists && !dri.running && dri.paused && !dri.error);
+
+    write_file(job_dir / "exitcode", "0\n");
+    dri = runner_info(dp, detsys, paths);
+    assert(dri.paused && !dri.error);
+
+    fs::remove(job_dir / "exitcode");
+    detsys.procs.push_back(ProcessInfo{4321, "python.exe", "python C:/other/job.py"});
+    dri = runner_info(dp, detsys, paths);
+    assert(dri.error && dri.error->find("gone") != std::string::npos);
+
+    // Discovery should infer display name/scope/interval from canonical detached-job names.
+    write_file(paths.registry, R"({"projects":[]})");
+    paths.discovery = true;
+    const auto discovered = load_projects(detsys, paths);
+    const auto it = std::find_if(discovered.begin(), discovered.end(), [&](const json::object& x) {
+        return x.at("id").as_string() == "job:demo__monitor__local__15m";
+    });
+    assert(it != discovered.end());
+    assert(it->at("name").as_string() == "demo · local monitor");
+    assert(it->at("area").as_string() == "其他监控 · 后台作业 · local");
+    assert(it->at("runner").as_object().at("interval_min").as_int64() == 15);
 
     fs::remove_all(root);
     std::cout << "core tests passed\n";
