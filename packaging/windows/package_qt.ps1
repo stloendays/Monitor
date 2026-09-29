@@ -21,6 +21,26 @@ function Get-Sha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
 }
 
+function Invoke-GuiSmoke([string]$Path, [string]$Argument) {
+    $stdout = [System.IO.Path]::GetTempFileName()
+    $stderr = [System.IO.Path]::GetTempFileName()
+    try {
+        $process = Start-Process -FilePath $Path -ArgumentList @($Argument) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+        if (-not $process.WaitForExit(30000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "GUI smoke timed out: $Path $Argument"
+        }
+        if ($process.ExitCode -ne 0) {
+            $detail = (Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue).Trim()
+            throw "GUI smoke failed ($($process.ExitCode)): $Path $Argument $detail"
+        }
+        return Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue
+    }
+    finally {
+        Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Copy-Tree([string]$Source, [string]$Destination) {
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
     Get-ChildItem -LiteralPath $Source -Force | ForEach-Object {
@@ -109,10 +129,7 @@ foreach ($runtime in @("vcruntime140.dll", "msvcp140.dll")) {
     }
 }
 
-$diag = Start-Process -FilePath $qtExe -ArgumentList "--desktop-diagnostics" -Wait -PassThru
-if ($diag.ExitCode -ne 0) {
-    throw "staged monitor_hub_qt.exe --desktop-diagnostics failed with exit code $($diag.ExitCode)"
-}
+Invoke-GuiSmoke $qtExe "--desktop-diagnostics" | Out-Null
 
 $cache = Join-Path $build "CMakeCache.txt"
 $versionMatch = Select-String -LiteralPath $cache -Pattern '^CMAKE_PROJECT_VERSION:STATIC=(.+)$' | Select-Object -First 1

@@ -43,11 +43,26 @@ jobs:
       - name: Desktop CLI smoke test
         shell: pwsh
         run: |
+          function Invoke-GuiSmoke([string]$Path, [string]$Argument) {
+            $stdout = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
+            $stderr = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
+            try {
+              $p = Start-Process -FilePath $Path -ArgumentList @($Argument) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+              if (-not $p.WaitForExit(30000)) {
+                Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                throw "GUI smoke timed out: $Argument"
+              }
+              if ($p.ExitCode -ne 0) {
+                $detail = (Get-Content $stderr -Raw -ErrorAction SilentlyContinue).Trim()
+                throw "GUI smoke failed ($($p.ExitCode)): $Argument $detail"
+              }
+            } finally {
+              Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+            }
+          }
           $exe = ".\cpp\build-qt\Release\monitor_hub_qt.exe"
-          $help = Start-Process -FilePath $exe -ArgumentList "--help" -Wait -PassThru
-          if ($help.ExitCode -ne 0) { throw "desktop --help failed: $($help.ExitCode)" }
-          $diag = Start-Process -FilePath $exe -ArgumentList "--desktop-diagnostics" -Wait -PassThru
-          if ($diag.ExitCode -ne 0) { throw "desktop diagnostics failed: $($diag.ExitCode)" }
+          Invoke-GuiSmoke $exe "--help"
+          Invoke-GuiSmoke $exe "--desktop-diagnostics"
 
       - name: Install NSIS
         shell: pwsh
@@ -85,9 +100,25 @@ jobs:
       - name: Installed package smoke test
         shell: pwsh
         run: |
+          function Invoke-GuiSmoke([string]$Path, [string]$Argument) {
+            $stdout = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
+            $stderr = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
+            try {
+              $p = Start-Process -FilePath $Path -ArgumentList @($Argument) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+              if (-not $p.WaitForExit(30000)) {
+                Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                throw "GUI smoke timed out: $Path $Argument"
+              }
+              if ($p.ExitCode -ne 0) {
+                $detail = (Get-Content $stderr -Raw -ErrorAction SilentlyContinue).Trim()
+                throw "GUI smoke failed ($($p.ExitCode)): $Path $Argument $detail"
+              }
+            } finally {
+              Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+            }
+          }
           $stagedExe = ".\dist\stage\bin\monitor_hub_qt.exe"
-          $staged = Start-Process -FilePath $stagedExe -ArgumentList "--desktop-diagnostics" -Wait -PassThru
-          if ($staged.ExitCode -ne 0) { throw "staged diagnostics failed: $($staged.ExitCode)" }
+          Invoke-GuiSmoke $stagedExe "--desktop-diagnostics"
           $version = (Get-Content ".\dist\stage\VERSION" -Raw).Trim()
           $installer = ".\dist\Monitor-Hub-$version-win64-setup.exe"
           if (-not (Test-Path -LiteralPath $installer)) { throw "installer missing: $installer" }
@@ -97,8 +128,7 @@ jobs:
           if ($install.ExitCode -ne 0) { throw "installer failed: $($install.ExitCode)" }
           $installedExe = Join-Path $installDir "bin\monitor_hub_qt.exe"
           if (-not (Test-Path -LiteralPath $installedExe)) { throw "installed executable missing" }
-          $installedDiag = Start-Process -FilePath $installedExe -ArgumentList "--desktop-diagnostics" -Wait -PassThru
-          if ($installedDiag.ExitCode -ne 0) { throw "installed diagnostics failed: $($installedDiag.ExitCode)" }
+          Invoke-GuiSmoke $installedExe "--desktop-diagnostics"
           $uninstaller = Join-Path $installDir "Uninstall.exe"
           $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "uninstaller failed: $($uninstall.ExitCode)" }
