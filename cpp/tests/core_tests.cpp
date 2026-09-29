@@ -1,6 +1,7 @@
 #include "monitor_hub/core.hpp"
 
 #include <boost/json.hpp>
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include <fstream>
