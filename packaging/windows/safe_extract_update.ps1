@@ -19,7 +19,20 @@ New-Item -ItemType Directory -Force -Path $destinationPath | Out-Null
 
 $zip = [System.IO.Compression.ZipFile]::OpenRead($archivePath)
 try {
+    if ($zip.Entries.Count -gt 5000) {
+        throw "update archive contains too many entries"
+    }
+
+    [int64]$totalUncompressed = 0
     foreach ($entry in $zip.Entries) {
+        if ($entry.Length -gt 512MB) {
+            throw "update archive entry is too large: $($entry.FullName)"
+        }
+        $totalUncompressed += $entry.Length
+        if ($totalUncompressed -gt 1GB) {
+            throw "update archive expands beyond the 1 GiB safety limit"
+        }
+
         $name = $entry.FullName.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
         if ([string]::IsNullOrWhiteSpace($name)) { continue }
 
