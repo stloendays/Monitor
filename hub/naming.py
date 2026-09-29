@@ -40,14 +40,53 @@ def parse_monitor_name(name):
     return d
 
 
+
+def read_monitor_meta(path):
+    """Read a literal top-level MONITOR_META dict without importing/executing the script."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            tree = ast.parse(f.read(), filename=str(path))
+    except (OSError, SyntaxError):
+        return {}
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, ast.Name) and t.id == "MONITOR_META" for t in targets):
+                try:
+                    value = ast.literal_eval(node.value)
+                except (ValueError, TypeError):
+                    return {}
+                return value if isinstance(value, dict) else {}
+    return {}
+
+
+def action_script_path(action):
+    """Return the first .py token in a runner action, preserving Windows paths."""
+    m = re.search(r'(?:"([^"]+\\.py)"|\'([^\']+\\.py)\'|([^\\s]+\\.py))', str(action or ""), re.I)
+    if not m:
+        return ""
+    return next((x for x in m.groups() if x), "").strip("()[]{};,")
+
+
 def parse_monitor_identity(name, action=""):
-    """Parse runner name first, then any canonical script basename in the action."""
+    """Parse canonical identity and merge safe MONITOR_META when the script is locally readable."""
+    script = action_script_path(action)
     d = parse_monitor_name(name)
-    if d:
-        return d
-    for token in re.findall(r"[^\s\"']+\.py", str(action or ""), re.I):
-        d = parse_monitor_name(token.strip("()[]{};,"))
-        if d:
-            d["runner_name"] = str(name or "")
-            return d
-    return {"canonical": False}
+    if not d and script:
+        d = parse_monitor_name(script)
+    if not d:
+        d = {"canonical": False}
+    if script:
+        d["script"] = script
+        meta = read_monitor_meta(script)
+        if meta:
+            d["meta"] = meta
+            for key in ("project_id", "scope", "interval_min", "display_name"):
+                if key in meta:
+                    if key == "project_id":
+                        d["project"] = str(meta[key])
+                    else:
+                        d[key] = meta[key]
+    if name and str(name) != d.get("display_name"):
+        d["runner_name"] = str(name)
+    return d
