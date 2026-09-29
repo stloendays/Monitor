@@ -360,7 +360,36 @@ std::string count_summary(const std::vector<std::string>& tags) {
 SystemInfo load_system_info_fixture(const fs::path& path) {
     SystemInfo out; auto v=read_json(path); if(!v||!v->is_object())return out; const auto& root=v->as_object();
     if(const auto* tasks=obj(root.if_contains("tasks"))) for(const auto& kv:*tasks){ if(!kv.value().is_object())continue; const auto& o=kv.value().as_object(); TaskInfo t; t.name=std::string(kv.key()); t.state=str(o.if_contains("state")); t.last=str(o.if_contains("last")); t.result=integer(o.if_contains("result")).value_or(0); t.next=str(o.if_contains("next")); t.interval=str(o.if_contains("interval")); t.action=str(o.if_contains("action")); out.tasks[t.name]=std::move(t); }
+    if(const auto* procs=arr(root.if_contains("procs"))) for(const auto& x:*procs){ if(!x.is_object())continue; const auto& o=x.as_object(); ProcessInfo p; p.pid=integer(o.if_contains("pid")).value_or(0); p.name=str(o.if_contains("name")); p.cmd=str(o.if_contains("cmd")); if(p.pid>0)out.procs.push_back(std::move(p)); }
     out.error=str(root.if_contains("error")); return out;
+}
+
+json::object system_info_json(const SystemInfo& system) {
+    object tasks;
+    for (const auto& [name, t] : system.tasks) {
+        object row;
+        row["name"] = t.name;
+        row["state"] = t.state;
+        row["last"] = t.last;
+        row["result"] = t.result;
+        row["next"] = t.next;
+        row["interval"] = t.interval;
+        row["action"] = t.action;
+        tasks[name] = std::move(row);
+    }
+    array procs;
+    for (const auto& p : system.procs) {
+        object row;
+        row["pid"] = p.pid;
+        row["name"] = p.name;
+        row["cmd"] = p.cmd;
+        procs.emplace_back(std::move(row));
+    }
+    object out;
+    out["tasks"] = std::move(tasks);
+    out["procs"] = std::move(procs);
+    out["error"] = system.error;
+    return out;
 }
 
 RunnerInfo runner_info(const object& p, const SystemInfo& system, const RuntimePaths&) {
