@@ -1,6 +1,7 @@
 #include "monitor_hub/core.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <string>
