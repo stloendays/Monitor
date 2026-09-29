@@ -43,7 +43,26 @@ qoi-ext__monitor__local__15m
 
 The hub can parse the project, scope and nominal interval from this name even before the monitor is registered.
 
-## 3. Per-task metadata in hub_status.json
+## 3. Script metadata: MONITOR_META
+
+New Python monitor scripts should declare a literal top-level dictionary near the top of the file:
+
+```python
+MONITOR_META = {
+    "schema": 1,
+    "project_id": "ceox-rh",
+    "scope": "hpc",
+    "interval_min": 300,
+    "display_name": "CeOx/Rh HPC monitor",
+    "param_keys": ["ENCUT_eV", "ISMEAR", "SIGMA_eV", "U_Ce_eV"],
+}
+```
+
+The hub reads this with Python AST + `ast.literal_eval`. It does **not** import or execute the monitor script. Keep `MONITOR_META` literal: strings, numbers, booleans, lists and dictionaries only.
+
+Use the filename for stable identity; use `MONITOR_META` for human-readable labels and parameter declarations. Scientific/runtime values themselves still belong in each task's `row_meta.params`.
+
+## 4. Per-task metadata in hub_status.json
 
 Every displayed table row may have an aligned object in `table.row_meta`.
 
@@ -92,7 +111,7 @@ Recommended keys:
 - `command`: launch/submit command.
 - `params`: structured parameters relevant to this task.
 
-## 4. UI behavior
+## 5. UI behavior
 
 For generic monitors, the hub now preserves `row_meta`. On the Progress tab:
 
@@ -102,6 +121,6 @@ For generic monitors, the hub now preserves `row_meta`. On the Progress tab:
 
 This keeps the visible table concise while making each row drillable.
 
-## 5. Compatibility
+## 6. Compatibility
 
 Old status files without `row_meta` continue to work unchanged. The naming parser is advisory for legacy monitors; it never changes their execution behavior.
