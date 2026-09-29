@@ -578,22 +578,67 @@ bool QtUpdateService::launch_apply(
         return false;
     }
 
-    const auto helper_dir =
+    const auto helper_root =
         QDir(update_root()).filePath(QStringLiteral("helpers"));
-    QDir().mkpath(helper_dir);
-    const auto detached_helper =
-        QDir(helper_dir)
+    const auto helper_run_dir =
+        QDir(helper_root)
             .filePath(
-                QStringLiteral("monitor_hub_updater-%1-%2.exe")
+                QStringLiteral("run-%1-%2")
                     .arg(release.version)
                     .arg(QDateTime::currentMSecsSinceEpoch()));
+    if (!QDir().mkpath(helper_run_dir)) {
+        if (error_message) {
+            *error_message =
+                QStringLiteral("无法创建独立更新 helper 目录。");
+        }
+        return false;
+    }
 
-    QFile::remove(detached_helper);
+    const auto detached_helper =
+        QDir(helper_run_dir)
+            .filePath(QStringLiteral("monitor_hub_updater.exe"));
     if (!QFile::copy(installed_helper, detached_helper)) {
         if (error_message) {
             *error_message =
                 QStringLiteral("无法复制独立更新 helper。");
         }
+        QDir(helper_run_dir).removeRecursively();
+        return false;
+    }
+
+    // The detached helper must not load Qt/MSVC runtime DLLs from the live
+    // install tree, otherwise Windows will keep those managed files locked
+    // while the helper tries to replace them.
+    const QDir app_bin(QCoreApplication::applicationDirPath());
+    const QStringList dependency_filters{
+        QStringLiteral("Qt6Core*.dll"),
+        QStringLiteral("msvcp*.dll"),
+        QStringLiteral("vcruntime*.dll"),
+        QStringLiteral("concrt*.dll"),
+    };
+    for (const auto& dep :
+         app_bin.entryInfoList(dependency_filters, QDir::Files)) {
+        const auto destination =
+            QDir(helper_run_dir).filePath(dep.fileName());
+        if (!QFile::copy(dep.absoluteFilePath(), destination)) {
+            if (error_message) {
+                *error_message =
+                    QStringLiteral("无法复制更新 helper 运行库：%1")
+                        .arg(dep.fileName());
+            }
+            QDir(helper_run_dir).removeRecursively();
+            return false;
+        }
+    }
+
+    if (!QFileInfo(
+            QDir(helper_run_dir).filePath(QStringLiteral("Qt6Core.dll")))
+            .isFile()) {
+        if (error_message) {
+            *error_message =
+                QStringLiteral("独立更新 helper 缺少 Qt6Core.dll。");
+        }
+        QDir(helper_run_dir).removeRecursively();
         return false;
     }
 
@@ -618,7 +663,7 @@ bool QtUpdateService::launch_apply(
         QStringLiteral("--background"),
     };
 
-    if (!QProcess::startDetached(detached_helper, args, update_root())) {
+    if (!QProcess::startDetached(detached_helper, args, helper_run_dir)) {
         if (error_message) {
             *error_message =
                 QStringLiteral("无法启动独立更新 helper。");
