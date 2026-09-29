@@ -34,7 +34,7 @@ int main() {
     fs::create_directories(root);
     const auto status = root / "hub_status.json";
     write_file(status,
-        R"({"updated":"2026-09-28T21:45:00","headline":"正常","summary":"","done":false,"attention":[],"working":"","table":{"cols":["作业","状态"],"rows":[["a","完成"],["b","运行中"]],"tags":["done","run"]},"notes":[],"next":"2026-09-28T22:00:00","error":""})");
+        R"({"updated":"2026-09-28T21:45:00","headline":"正常","summary":"","done":false,"attention":[],"working":"","table":{"cols":["作业","状态"],"rows":[["a","完成"],["b","运行中"]],"tags":["done","run"],"row_meta":[{"task_id":"a","open_path":"C:/demo/a"}]},"notes":[],"next":"2026-09-28T22:00:00","error":""})");
 
     json::object p;
     p["id"] = "x";
@@ -57,6 +57,9 @@ int main() {
     assert(s.at("health").as_string() == "ok" || s.at("health").as_string() == "stale");
     assert(s.at("summary").as_string() == "完成 1，运行 1");
     assert(s.at("results_list").as_array().empty());
+    const auto& meta = s.at("table").as_object().at("row_meta").as_array();
+    assert(meta.size() == 2);
+    assert(meta[0].as_object().at("task_id").as_string() == "a");
 
     write_file(status,
         R"({"updated":"2026-09-28T21:45:00","headline":"done","done":true,"attention":["x"],"working":"x","table":{"cols":[],"rows":[],"tags":[]},"error":"boom"})");
