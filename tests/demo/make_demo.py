@@ -51,7 +51,12 @@ def main():
     status(a, headline="训练在跑，没有需要你处理的事。", summary="", done=False, attention=[], working="",
            table=dict(cols=["任务", "状态", "进度", "最近检查点", "预计剩余"],
                       rows=[["fold1", "完成", "100%", "2 小时前", "—"], ["fold2", "运行中", "62%", "3 分钟前", "1.4 小时"],
-                            ["fold3", "排队", "0%", "—", "—"]], tags=["done", "run", "queue"]),
+                            ["fold3", "排队", "0%", "—", "—"]], tags=["done", "run", "queue"],
+                      row_meta=[
+                          dict(task_id="fold1", open_path=a, log=os.path.join(a, "actions.log"), params=dict(fold=1, batch_size=64)),
+                          dict(task_id="fold2", open_path=a, log=os.path.join(a, "actions.log"), params=dict(fold=2, batch_size=32, grad_accum=2)),
+                          dict(task_id="fold3", open_path=a, params=dict(fold=3, batch_size=64)),
+                      ]),
            notes=["GPU 占用 3 / 8"], next=(NOW + dt.timedelta(minutes=11)).isoformat())
     write(os.path.join(a, "results.md"), "# 结果汇总（进行中）\n\n| fold | 验证集 R² | n |\n|---|---|---|\n| fold1 | 0.912 | 1200 |\n")
     write(os.path.join(a, "actions.log"), "%s  RESTART fold2 (#1): checkpoint resume\n%s  fold1 finished, results.md updated\n" % (iso(95), iso(30)))
