@@ -122,15 +122,6 @@ QString asset_url(const QJsonArray& assets, const QString& name) {
     return {};
 }
 
-bool has_git_ancestor(QString path) {
-    QDir dir(path);
-    for (int i = 0; i < 12; ++i) {
-        if (QFileInfo(dir.filePath(QStringLiteral(".git"))).exists()) return true;
-        if (!dir.cdUp()) break;
-    }
-    return false;
-}
-
 QString find_release_root() {
     QDir dir(QCoreApplication::applicationDirPath());
     for (int i = 0; i < 8; ++i) {
@@ -208,6 +199,7 @@ bool run_safe_extract(
 bool verify_extracted_stage(
     const QString& helper,
     const QString& stage,
+    const QString& expected_version,
     QString* error_message) {
     QProcess process;
     process.start(
@@ -223,6 +215,17 @@ bool verify_extracted_stage(
             *error_message = detail.isEmpty()
                 ? QStringLiteral("更新包 manifest 校验失败。")
                 : QStringLiteral("更新包 manifest 校验失败：%1").arg(detail);
+        }
+        return false;
+    }
+
+    const auto verified_version =
+        QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    if (verified_version != expected_version) {
+        if (error_message) {
+            *error_message =
+                QStringLiteral("Release 版本与更新包 manifest 不一致：%1 != %2")
+                    .arg(expected_version, verified_version);
         }
         return false;
     }
@@ -533,6 +536,7 @@ void QtUpdateService::stage_release(
                     if (!verify_extracted_stage(
                             helper,
                             extracted,
+                            release.version,
                             &verify_error)) {
                         QDir(work).removeRecursively();
                         callback({}, verify_error);
