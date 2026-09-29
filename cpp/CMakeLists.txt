@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
-project(MonitorHubCpp VERSION 0.1.0 LANGUAGES CXX)
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" MONITOR_HUB_VERSION)
+string(STRIP "${MONITOR_HUB_VERSION}" MONITOR_HUB_VERSION)
+if(NOT MONITOR_HUB_VERSION MATCHES "^[0-9]+[.][0-9]+[.][0-9]+$")
+    message(FATAL_ERROR "Invalid VERSION: '${MONITOR_HUB_VERSION}'")
+endif()
+project(MonitorHubCpp VERSION ${MONITOR_HUB_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,6 +34,7 @@ endif()
 
 add_executable(monitor_hub_cli src/main.cpp)
 target_link_libraries(monitor_hub_cli PRIVATE monitor_hub_core)
+target_compile_definitions(monitor_hub_cli PRIVATE MONITOR_HUB_VERSION="${MONITOR_HUB_VERSION}")
 
 include(CTest)
 if(BUILD_TESTING)
