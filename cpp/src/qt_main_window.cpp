@@ -488,7 +488,7 @@ void QtMainWindow::render_task_detail() {
         params_->setRowCount(static_cast<int>(param_obj->size()));
         int row_index = 0;
         for (const auto& kv : *param_obj) {
-            params_->setItem(row_index, 0, new QTableWidgetItem(q(std::string(kv.key()))));
+            params_->setItem(row_index, 0, new QTableWidgetItem(q(std::string(kv.key().data(), kv.key().size()))));
             params_->setItem(row_index, 1, new QTableWidgetItem(q(s(&kv.value(), json::serialize(kv.value())))));
             ++row_index;
         }
