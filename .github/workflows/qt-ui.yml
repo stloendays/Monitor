@@ -43,3 +43,5 @@ jobs:
         run: |
           & ".\cpp\build-qt\Release\monitor_hub_qt.exe" --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ".\cpp\build-qt\Release\monitor_hub_qt.exe" --desktop-diagnostics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
