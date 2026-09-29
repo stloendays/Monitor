@@ -7,6 +7,7 @@ namespace monitor_hub {
 struct DesktopSettings {
     bool close_to_tray = true;
     bool notifications = true;
+    bool check_updates = true;
     bool launch_at_login = false;
 };
 
@@ -15,6 +16,7 @@ DesktopSettings load_desktop_settings();
 bool save_desktop_preferences(
     bool close_to_tray,
     bool notifications,
+    bool check_updates,
     QString* error_message = nullptr);
 
 bool launch_at_login_enabled();

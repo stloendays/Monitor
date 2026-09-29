@@ -12,6 +12,7 @@ namespace {
 
 constexpr auto kCloseToTray = "desktop/close_to_tray";
 constexpr auto kNotifications = "desktop/notifications";
+constexpr auto kCheckUpdates = "desktop/check_updates";
 constexpr auto kStartupValueName = "Monitor Hub";
 
 #ifdef Q_OS_WIN
@@ -38,6 +39,7 @@ DesktopSettings load_desktop_settings() {
     DesktopSettings out;
     out.close_to_tray = settings.value(kCloseToTray, true).toBool();
     out.notifications = settings.value(kNotifications, true).toBool();
+    out.check_updates = settings.value(kCheckUpdates, true).toBool();
     out.launch_at_login = launch_at_login_enabled();
     return out;
 }
@@ -45,10 +47,12 @@ DesktopSettings load_desktop_settings() {
 bool save_desktop_preferences(
     bool close_to_tray,
     bool notifications,
+    bool check_updates,
     QString* error_message) {
     QSettings settings;
     settings.setValue(kCloseToTray, close_to_tray);
     settings.setValue(kNotifications, notifications);
+    settings.setValue(kCheckUpdates, check_updates);
     settings.sync();
 
     if (settings.status() != QSettings::NoError) {
@@ -139,6 +143,9 @@ QString desktop_diagnostics_text() {
                                         : QStringLiteral("false"))
           << QStringLiteral("notifications=%1").arg(
                  settings.notifications ? QStringLiteral("true")
+                                        : QStringLiteral("false"))
+          << QStringLiteral("check_updates=%1").arg(
+                 settings.check_updates ? QStringLiteral("true")
                                         : QStringLiteral("false"))
           << QStringLiteral("launch_at_login=%1").arg(
                  settings.launch_at_login ? QStringLiteral("true")
