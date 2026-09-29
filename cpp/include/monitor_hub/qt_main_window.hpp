@@ -18,9 +18,18 @@ class QTimer;
 
 namespace monitor_hub {
 
+struct QtDesktopProjectState {
+    std::string id;
+    std::string name;
+    std::string health;
+    std::string summary;
+};
+
 class QtMainWindow final : public QMainWindow {
 public:
     explicit QtMainWindow(RuntimePaths paths, QWidget* parent = nullptr);
+
+    std::vector<QtDesktopProjectState> desktop_project_states() const;
 
 private:
     void build_ui();
