@@ -333,6 +333,28 @@ void QtMainWindow::refresh() {
     render_project();
 }
 
+std::vector<QtDesktopProjectState> QtMainWindow::desktop_project_states() const {
+    std::vector<QtDesktopProjectState> out;
+    out.reserve(projects_.size());
+
+    for (const auto& project : projects_) {
+        const auto id = s(project.if_contains("id"));
+        const auto name = s(project.if_contains("name"), id);
+        const auto it = snapshots_.find(id);
+        if (it == snapshots_.end()) {
+            out.push_back({id, name, "error", "monitor snapshot unavailable"});
+            continue;
+        }
+
+        const auto health = s(it->second.if_contains("health"), "ok");
+        auto summary = s(it->second.if_contains("problem"));
+        if (summary.empty()) summary = s(it->second.if_contains("headline"));
+        out.push_back({id, name, health, summary});
+    }
+
+    return out;
+}
+
 void QtMainWindow::render_sidebar() {
     project_list_->blockSignals(true);
     project_list_->clear();
