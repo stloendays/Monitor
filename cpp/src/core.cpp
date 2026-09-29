@@ -253,9 +253,11 @@ std::string tail_text_local(const fs::path& path, std::size_t nbytes = 200000) {
     std::ifstream in(path, std::ios::binary);
     if(!in)return {};
     in.seekg(0,std::ios::end);
-    const auto size=in.tellg();
-    const auto start=size>static_cast<std::streamoff>(nbytes)?size-static_cast<std::streamoff>(nbytes):std::streamoff(0);
-    in.seekg(start);
+    const auto pos=in.tellg();
+    if(pos==std::streampos(-1))return {};
+    const auto size=static_cast<std::streamoff>(pos);
+    const std::streamoff start=size>static_cast<std::streamoff>(nbytes)?size-static_cast<std::streamoff>(nbytes):0;
+    in.seekg(start,std::ios::beg);
     std::string data((std::istreambuf_iterator<char>(in)),std::istreambuf_iterator<char>());
     if(start>0){
         const auto nl=data.find('\n');
