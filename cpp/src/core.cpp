@@ -379,6 +379,163 @@ std::optional<std::string> detach_state(const std::string& name, const SystemInf
     return std::string("gone");
 }
 
+bool pid_alive(std::int64_t pid, const SystemInfo& system) {
+    return std::any_of(system.procs.begin(), system.procs.end(), [&](const ProcessInfo& p){ return p.pid == pid; });
+}
+
+std::string read_tail(const fs::path& path, std::size_t max_bytes = 200000) {
+    std::ifstream in(path, std::ios::binary | std::ios::ate);
+    if(!in) return {};
+    const auto end = in.tellg();
+    if(end <= 0) return {};
+    const auto size = static_cast<std::uint64_t>(end);
+    const auto start = size > max_bytes ? size - max_bytes : 0;
+    in.seekg(static_cast<std::streamoff>(start), std::ios::beg);
+    std::string data(static_cast<std::size_t>(size - start), '\0');
+    in.read(data.data(), static_cast<std::streamsize>(data.size()));
+    return data;
+}
+
+std::optional<object> stream_result(const fs::path& path) {
+    const auto text = read_tail(path);
+    std::size_t end = text.size();
+    while(end > 0) {
+        auto begin = text.rfind('\n', end - 1);
+        begin = begin == std::string::npos ? 0 : begin + 1;
+        auto line = trim(text.substr(begin, end - begin));
+        if(!line.empty() && line.front() == '{') {
+            boost::system::error_code ec;
+            auto value = json::parse(line, ec);
+            if(!ec && value.is_object() && str(value.as_object().if_contains("type")) == "result")
+                return value.as_object();
+        }
+        if(begin == 0) break;
+        end = begin - 1;
+    }
+    return std::nullopt;
+}
+
+std::string first_line(std::string text) {
+    const auto p = text.find_first_of("\r\n");
+    if(p != std::string::npos) text.resize(p);
+    return trim(text);
+}
+
+std::string friendly_error(std::string text) {
+    const auto l = lower(text);
+    if(l.find("session limit") != std::string::npos || l.find("usage limit") != std::string::npos || l.find("hit your limit") != std::string::npos)
+        return "Claude 额度用完";
+    if(l.find("not logged in") != std::string::npos || l.find("please run /login") != std::string::npos || l.find("invalid api key") != std::string::npos)
+        return "Claude 没有登录";
+    if(l.find("api error") != std::string::npos || l.find("internal server error") != std::string::npos || l.find("overloaded") != std::string::npos)
+        return "Claude 服务出错（" + text.substr(0, std::min<std::size_t>(80, text.size())) + "）";
+    return text;
+}
+
+array detach_takeovers(const std::string& prefix, const SystemInfo& system, const RuntimePaths& paths) {
+    array out;
+    std::error_code ec;
+    if(!fs::is_directory(paths.job_root, ec) || ec) return out;
+    const std::regex stamp_re(R"((\d{8})-(\d{4}))");
+    for(const auto& entry : fs::directory_iterator(paths.job_root, ec)) {
+        if(ec) break;
+        if(!entry.is_directory(ec) || ec) continue;
+        const auto name = entry.path().filename().string();
+        if(name.rfind(prefix, 0) != 0) continue;
+        const auto st = detach_state(name, system, paths);
+        const auto log = entry.path() / "output.log";
+        const auto result = stream_result(log);
+        const bool result_error = result && boolean(result->if_contains("is_error"));
+        const auto result_text = result ? str(result->if_contains("result")) : std::string{};
+        const std::string state = st && *st == "running" ? "running" :
+                                  (result && !result_error && st && *st == "exit:0") ? "ok" : "failed";
+        std::string error;
+        if(state == "failed") error = result_error ? friendly_error(result_text) :
+            "进程退出（" + (st ? *st : std::string("不存在")) + "），没有结果";
+        const auto summary = strip_md(first_line(error.empty() ? result_text : error));
+
+        double when = mtime_seconds(entry.path() / "started").value_or(mtime_seconds(entry.path()).value_or(0.0));
+        std::string label = name;
+        std::smatch m;
+        if(std::regex_search(name, m, stamp_re))
+            label = m[1].str().substr(4,2) + "-" + m[1].str().substr(6,2) + " " + m[2].str().substr(0,2) + ":" + m[2].str().substr(2,2);
+
+        object item;
+        item["key"] = name; item["time"] = when; item["state"] = state;
+        item["error"] = error.substr(0, std::min<std::size_t>(160, error.size()));
+        item["summary"] = summary.substr(0, std::min<std::size_t>(200, summary.size()));
+        item["path"] = log.string(); item["kind"] = "jsonl"; item["label"] = label;
+        out.emplace_back(std::move(item));
+    }
+    return out;
+}
+
+double stamp_epoch(const std::string& stamp) {
+    if(stamp.size() != 13) return 0.0;
+    std::tm tm{};
+    try {
+        tm.tm_year = std::stoi(stamp.substr(0,4)) - 1900;
+        tm.tm_mon = std::stoi(stamp.substr(4,2)) - 1;
+        tm.tm_mday = std::stoi(stamp.substr(6,2));
+        tm.tm_hour = std::stoi(stamp.substr(9,2));
+        tm.tm_min = std::stoi(stamp.substr(11,2));
+    } catch(...) { return 0.0; }
+    tm.tm_isdst = -1;
+    return static_cast<double>(std::mktime(&tm));
+}
+
+array glob_takeovers(const object& config, const SystemInfo& system) {
+    array out;
+    const fs::path pattern = str(config.if_contains("pattern"));
+    if(pattern.empty()) return out;
+    const auto folder = pattern.parent_path();
+    std::error_code ec;
+    if(!fs::is_directory(folder, ec) || ec) return out;
+
+    struct Pair { fs::path jsonl; fs::path md; };
+    std::map<std::string, Pair> stamps;
+    const std::regex file_re(R"(^claude_takeover_(\d{8}_\d{4})\.(jsonl|md)$)", std::regex::icase);
+    for(const auto& entry : fs::directory_iterator(folder, ec)) {
+        if(ec) break;
+        if(!entry.is_regular_file(ec) || ec) continue;
+        std::smatch m;
+        const auto name = entry.path().filename().string();
+        if(!std::regex_match(name, m, file_re)) continue;
+        if(lower(m[2].str()) == "jsonl") stamps[m[1].str()].jsonl = entry.path();
+        else stamps[m[1].str()].md = entry.path();
+    }
+
+    std::optional<std::int64_t> lock_pid;
+    const fs::path lock = str(config.if_contains("lock"));
+    if(!lock.empty() && fs::exists(lock, ec) && !ec) {
+        try { lock_pid = std::stoll(trim(read_text(lock))); } catch(...) {}
+    }
+    const auto newest = stamps.empty() ? std::string{} : stamps.rbegin()->first;
+
+    for(const auto& [stamp, files] : stamps) {
+        const auto md = trim(read_text(files.md));
+        const auto result = files.jsonl.empty() ? std::optional<object>{} : stream_result(files.jsonl);
+        std::string state;
+        if(stamp == newest && lock_pid && pid_alive(*lock_pid, system)) state = "running";
+        else if(result) state = boolean(result->if_contains("is_error")) ? "failed" : "ok";
+        else state = md.empty() ? "failed" : "ok";
+
+        std::string summary = md.empty() ? (result ? first_line(str(result->if_contains("result"))) : std::string{}) : first_line(md);
+        std::string error = state == "failed" && result ? friendly_error(str(result->if_contains("result"))) : std::string{};
+        if(!error.empty()) summary = error;
+        const auto when = stamp_epoch(stamp);
+
+        object item;
+        item["key"] = stamp; item["time"] = when; item["state"] = state; item["error"] = error;
+        item["summary"] = strip_md(summary).substr(0, std::min<std::size_t>(200, strip_md(summary).size()));
+        item["path"] = (!files.jsonl.empty() ? files.jsonl : files.md).string();
+        item["kind"] = files.jsonl.empty() ? "md" : "jsonl";
+        item["label"] = stamp.substr(4,2) + "-" + stamp.substr(6,2) + " " + stamp.substr(9,2) + ":" + stamp.substr(11,2);
+        out.emplace_back(std::move(item));
+    }
+    return out;
+}
+
 RunnerInfo runner_info(const object& p, const SystemInfo& system, const RuntimePaths& paths) {
     RunnerInfo x; const auto* r=obj(p.if_contains("runner")); if(!r)return x; x.kind=str(r->if_contains("kind")); x.name=str(r->if_contains("name")); x.interval_min=integer(r->if_contains("interval_min"));
     if(x.kind=="none"){x.exists=true;x.text=str(p.if_contains("runner_text"));return x;}
@@ -402,12 +559,26 @@ RunnerInfo runner_info(const object& p, const SystemInfo& system, const RuntimeP
     x.error="C++ 尚未接入 runner.kind="+x.kind; return x;
 }
 
-json::array takeovers(const object&, const SystemInfo&, const RuntimePaths&) { return {}; }
+json::array takeovers(const object& p, const SystemInfo& system, const RuntimePaths& paths) {
+    const auto* config = obj(p.if_contains("takeovers"));
+    if(!config) return {};
+    array out;
+    const auto kind = str(config->if_contains("kind"));
+    if(kind == "detach") out = detach_takeovers(str(config->if_contains("prefix")), system, paths);
+    else if(kind == "glob") out = glob_takeovers(*config, system);
+    std::sort(out.begin(), out.end(), [](const value& a, const value& b) {
+        const auto* ao = obj(&a); const auto* bo = obj(&b);
+        const double at = ao && ao->if_contains("time") && ao->at("time").is_double() ? ao->at("time").as_double() : 0.0;
+        const double bt = bo && bo->if_contains("time") && bo->at("time").is_double() ? bo->at("time").as_double() : 0.0;
+        return at > bt;
+    });
+    return out;
+}
 
 json::object snapshot(const object& p, const SystemInfo& system, const RuntimePaths& paths) {
     const auto runner=runner_info(p,system,paths); const auto adapter=str(p.if_contains("adapter"),"runner_only"); object s;
     if(adapter=="generic")s=generic_adapter(p,runner); else if(adapter=="setup")s=setup_adapter(paths); else if(adapter=="runner_only")s=runner_only_adapter(runner); else {s=runner_only_adapter(runner);s["error"]="C++ phase 1 尚未迁移 adapter："+adapter;}
-    s["runner"]=runner_json(runner); s["results_list"]=result_list(p,s);
+    s["runner"]=runner_json(runner); s["results_list"]=result_list(p,s); s["takeovers"]=takeovers(p,system,paths);
     std::optional<double> updated; if(const auto* v=s.if_contains("updated");v&&v->is_double())updated=v->as_double();
     const bool stale=updated&&runner.interval_min&&!runner.paused&&adapter!="setup"&&(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count()-*updated>(2**runner.interval_min+30)*60.0);
     const bool done=boolean(s.if_contains("done")), has_error=!str(s.if_contains("error")).empty()||runner.error.has_value(); const auto attention=strings(s.if_contains("attention")); const bool working=!str(s.if_contains("working")).empty(); std::string health;
