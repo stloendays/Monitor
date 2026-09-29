@@ -615,7 +615,7 @@ def adapt_generic(p, sysinfo, runner):
 def adapt_setup(p, sysinfo, runner):
     """Requests submitted from the hub's 新建监控任务 dialog and their setup agents."""
     tks = {t["key"]: t for t in _detach_takeovers("hub-setup-", sysinfo)}
-    rows, tags, attention = [], [], []
+    rows, tags, attention, row_meta = [], [], [], []
     for f in sorted(glob.glob(os.path.join(REQ_DIR, "*_request.md")), reverse=True):
         stamp = os.path.basename(f)[:-len("_request.md")]
         text = read_text(f)
@@ -634,6 +634,14 @@ def adapt_setup(p, sysinfo, runner):
             summary = t["summary"]
         rows.append([dt.datetime.strptime(stamp, "%Y%m%d-%H%M%S").strftime("%m-%d %H:%M"), name, label, strip_md(summary)[:120]])
         tags.append({"running": "run", "ok": "done" if not need else "bad", "failed": "bad"}[state])
+        request_path = f
+        report_path = os.path.join(REQ_DIR, stamp + "_report.md")
+        meta = dict(task_id=stamp, open_path=report_path if os.path.exists(report_path) else request_path)
+        if os.path.exists(report_path):
+            meta["result"] = report_path
+        if t and t.get("path"):
+            meta["log"] = t["path"]
+        row_meta.append(meta)
         if need:
             attention.append("%s：%s" % (name, "；".join(need)))
         if state == "failed":
@@ -642,7 +650,7 @@ def adapt_setup(p, sysinfo, runner):
                 headline=("交给后台 Claude 设置的监控任务。办好后，新项目会出现在左侧“项目”里。" if rows else
                           "还没有提交过新任务。点左下角“新建监控任务”，按格式填写后交给后台 Claude 办理。"),
                 summary="%d 个请求" % len(rows) if rows else "", notes=[], extras=[],
-                table=dict(cols=["提交时间", "项目", "状态", "说明"], rows=rows, tags=tags), attention=attention,
+                table=dict(cols=["提交时间", "项目", "状态", "说明"], rows=rows, tags=tags, row_meta=row_meta), attention=attention,
                 working="后台 Claude 正在设置新监控" if any(t == "run" for t in tags) else None, done=False)
     snap["takeovers"] = sorted(tks.values(), key=lambda x: x["time"] or 0, reverse=True)
     return snap

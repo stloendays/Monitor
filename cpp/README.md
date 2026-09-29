@@ -118,3 +118,19 @@ Key migration rule:
 - the Python hub uses `live.{job}` first and only falls back to `qoi_ext_monitor.scan()` for a RUNNING job whose live data is missing.
 
 The long-term target remains the generic `hub_status.json` contract. See `docs/QOI_ADAPTER.md` and `hub/qoi_status.example.json`.
+
+
+## Phase 6: setup-request parity and result discovery
+
+The C++ snapshot layer now has parity for the hub's built-in “新任务办理” project:
+
+- scan `<stamp>_request.md` and `<stamp>_report.md`;
+- correlate each request with `hub-setup-<stamp>` detached Claude takeovers;
+- parse `NEEDS_USER:` from setup reports;
+- distinguish running / completed / completed-needs-user / interrupted setup requests;
+- expose request/report/takeover files through task-detail metadata;
+- surface setup failures and user decisions through the normal attention model.
+
+Final deliverables also support project-level `results_glob` patterns in C++. Explicit results and glob-discovered files are merged into `results_list`, with duplicate paths removed.
+
+Both features are still read-only discovery. They do not launch setup agents or mutate result files.

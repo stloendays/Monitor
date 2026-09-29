@@ -234,18 +234,75 @@ object runner_json(const RunnerInfo& r) {
     return o;
 }
 
+std::string wildcard_regex_text(std::string pattern){
+    std::replace(pattern.begin(),pattern.end(),'\\','/');
+    std::string out="^";
+    for(std::size_t i=0;i<pattern.size();++i){
+        const char ch=pattern[i];
+        if(ch=='*'){
+            if(i+1<pattern.size()&&pattern[i+1]=='*'){out+=".*";++i;}
+            else out+="[^/]*";
+        }else if(ch=='?')out+="[^/]";
+        else{
+            if(std::string(".^$|()[]{}+\\").find(ch)!=std::string::npos)out+='\\';
+            out+=ch;
+        }
+    }
+    out+="$";return out;
+}
+
+std::vector<fs::path> glob_files(const std::string& raw_pattern){
+    std::vector<fs::path> out;
+    if(raw_pattern.empty())return out;
+    std::string pattern=raw_pattern;std::replace(pattern.begin(),pattern.end(),'\\','/');
+    const auto wild=pattern.find_first_of("*?");
+    if(wild==std::string::npos){
+        std::error_code ec;if(fs::is_regular_file(fs::path(raw_pattern),ec))out.push_back(fs::path(raw_pattern));
+        return out;
+    }
+    const auto slash=pattern.rfind('/',wild);
+    const std::string base_text=slash==std::string::npos?".":pattern.substr(0,slash);
+    const std::string rel_pattern=slash==std::string::npos?pattern:pattern.substr(slash+1);
+    const bool recursive=rel_pattern.find("**")!=std::string::npos||rel_pattern.find('/')!=std::string::npos;
+    const std::regex re(wildcard_regex_text(rel_pattern),std::regex::icase);
+    const fs::path base=base_text.empty()?fs::path("/"):fs::path(base_text);
+    std::error_code ec;
+    if(!fs::is_directory(base,ec))return out;
+    auto consider=[&](const fs::directory_entry& e){
+        std::error_code rec;if(!e.is_regular_file(rec))return;
+        const auto rel=fs::relative(e.path(),base,rec);
+        if(rec)return;
+        auto text=rel.generic_string();
+        if(std::regex_match(text,re))out.push_back(e.path());
+    };
+    if(recursive){
+        for(fs::recursive_directory_iterator it(base,fs::directory_options::skip_permission_denied,ec),end;it!=end&&!ec;it.increment(ec))consider(*it);
+    }else{
+        for(fs::directory_iterator it(base,fs::directory_options::skip_permission_denied,ec),end;it!=end&&!ec;it.increment(ec))consider(*it);
+    }
+    std::sort(out.begin(),out.end(),[](const fs::path& a,const fs::path& b){return a.generic_string()<b.generic_string();});
+    return out;
+}
+
 array result_list(const object& p, const object& snap) {
     array out;
+    std::set<std::string> seen;
+    auto add=[&](const std::string& label,const std::string& path){
+        if(path.empty()||!seen.insert(path).second)return;
+        array pair;pair.emplace_back(label.empty()?fs::path(path).filename().string():label);pair.emplace_back(path);out.emplace_back(std::move(pair));
+    };
     auto append = [&](const value* v) {
         if (const auto* a = arr(v)) for (const auto& x : *a) {
             const auto* o = obj(&x); if (!o) continue;
-            auto path = str(o->if_contains("path")); if (path.empty()) continue;
-            auto label = str(o->if_contains("label")); if (label.empty()) label = fs::path(path).filename().string();
-            array pair; pair.emplace_back(label); pair.emplace_back(path); out.emplace_back(std::move(pair));
+            const auto path = str(o->if_contains("path")); if (path.empty()) continue;
+            add(str(o->if_contains("label")),path);
         }
     };
     append(p.if_contains("results"));
     append(snap.if_contains("results"));
+    if(const auto* globs=arr(p.if_contains("results_glob")))for(const auto& x:*globs){
+        for(const auto& path:glob_files(str(&x)))add(path.filename().string(),path.string());
+    }
     return out;
 }
 
@@ -770,21 +827,95 @@ object generic_adapter(const object& p, const RunnerInfo& runner) {
     return snap;
 }
 
-object setup_adapter(const RuntimePaths& paths) {
-    const auto dir = paths.hub_data / "requests";
-    double updated = 0.0; std::size_t count = 0;
-    if (fs::is_directory(dir)) for (const auto& e : fs::directory_iterator(dir)) {
-        updated = std::max(updated, mtime_seconds(e.path()).value_or(0.0));
-        if (e.is_regular_file() && e.path().filename().string().ends_with("_request.md")) ++count;
+object setup_adapter(const SystemInfo& system,const RuntimePaths& paths) {
+    const auto dir=paths.hub_data/"requests";
+    const auto tks=detach_takeovers("hub-setup-",system,paths);
+    std::map<std::string,const object*> takeover_by_key;
+    for(const auto& x:tks)if(x.is_object())takeover_by_key[str(x.as_object().if_contains("key"))]=&x.as_object();
+
+    struct RequestRow{std::string stamp;fs::path request;};
+    std::vector<RequestRow> requests;
+    double updated=0.0;
+    std::error_code ec;
+    if(fs::is_directory(dir,ec)){
+        for(fs::directory_iterator it(dir,fs::directory_options::skip_permission_denied,ec),end;it!=end&&!ec;it.increment(ec)){
+            std::error_code rec;if(!it->is_regular_file(rec))continue;
+            updated=std::max(updated,mtime_seconds(it->path()).value_or(0.0));
+            const auto name=it->path().filename().string();
+            const std::string suffix="_request.md";
+            if(name.size()>suffix.size()&&name.compare(name.size()-suffix.size(),suffix.size(),suffix)==0)
+                requests.push_back({name.substr(0,name.size()-suffix.size()),it->path()});
+        }
     }
-    object tb; tb["cols"] = array{"提交时间", "项目", "状态", "说明"}; tb["rows"] = array{}; tb["tags"] = array{};
+    std::sort(requests.begin(),requests.end(),[](const RequestRow& a,const RequestRow& b){return a.stamp>b.stamp;});
+
+    array rows,tags,attention,row_meta;
+    bool any_running=false;
+    for(const auto& req:requests){
+        const auto request_text=read_text(req.request);
+        std::string project_name="（未写项目名称）";
+        std::istringstream rin(request_text);std::string line;
+        while(std::getline(rin,line)){
+            line=trim(line);
+            const std::string prefix="项目名称：";
+            if(line.rfind(prefix,0)==0){auto name=trim(line.substr(prefix.size()));if(!name.empty())project_name=name;break;}
+        }
+
+        const auto report_path=dir/(req.stamp+"_report.md");
+        const auto report=read_text(report_path);
+        std::vector<std::string> needs;
+        std::istringstream repin(report);
+        const std::regex need_re(R"(^\s*NEEDS_USER:\s*(.*)$)",std::regex::icase);
+        while(std::getline(repin,line)){
+            std::smatch m;if(!std::regex_match(line,m,need_re))continue;
+            auto v=trim(m[1].str());
+            if(v.empty())continue;
+            if(std::regex_match(v,std::regex(R"(^(none|no\b|n/?a|nothing|无|不需要).*$)",std::regex::icase)))continue;
+            needs.push_back(v);
+        }
+
+        const auto key="hub-setup-"+req.stamp;
+        const object* tk=nullptr;
+        if(auto it=takeover_by_key.find(key);it!=takeover_by_key.end())tk=it->second;
+        const auto state=tk?str(tk->if_contains("state")):std::string("failed");
+        if(state=="running")any_running=true;
+
+        std::string label;
+        if(state=="running")label="办理中";
+        else if(state=="ok")label=needs.empty()?"已办好":"办好了，有事要你定";
+        else label="中断："+(tk&&!str(tk->if_contains("error")).empty()?str(tk->if_contains("error")):"后台作业不存在");
+
+        std::string summary;
+        std::istringstream sin(report);
+        while(std::getline(sin,line)){
+            line=trim(line);if(line.empty()||line.rfind("#",0)==0)continue;summary=line;break;
+        }
+        if(state=="failed"){
+            summary=summary.empty()?"没有写出办理报告":"报告已写出："+summary+"；但任务没有正常结束，请核对报告";
+        }else if(summary.empty()&&tk)summary=str(tk->if_contains("summary"));
+
+        std::string display=req.stamp;
+        if(req.stamp.size()>=13&&req.stamp[8]=='-')display=req.stamp.substr(4,2)+"-"+req.stamp.substr(6,2)+" "+req.stamp.substr(9,2)+":"+req.stamp.substr(11,2);
+
+        array row;row.emplace_back(display);row.emplace_back(project_name);row.emplace_back(label);row.emplace_back(strip_md(summary).substr(0,120));rows.emplace_back(std::move(row));
+        tags.emplace_back(state=="running"?"run":state=="ok"&&needs.empty()?"done":"bad");
+        for(const auto& need:needs)attention.emplace_back(project_name+"："+need);
+        if(state=="failed")attention.emplace_back(project_name+"：后台办理中断（"+(tk&&!str(tk->if_contains("error")).empty()?str(tk->if_contains("error")):"后台作业不存在")+"），见“后台处理记录”；额度恢复后可以重新提交");
+
+        object meta;meta["task_id"]=req.stamp;meta["open_path"]=(fs::exists(report_path)?report_path:req.request).string();
+        meta["result"]=fs::exists(report_path)?report_path.string():std::string{};
+        if(tk)meta["log"]=str(tk->if_contains("path"));
+        row_meta.emplace_back(std::move(meta));
+    }
+
+    object table;table["cols"]=array{"提交时间","项目","状态","说明"};table["rows"]=std::move(rows);table["tags"]=std::move(tags);table["row_meta"]=std::move(row_meta);
     object s;
-    s["updated"] = updated > 0 ? value(updated) : value(nullptr);
-    s["headline"] = count ? "交给后台 Claude 设置的监控任务。办好后，新项目会出现在左侧“项目”里。" :
-                            "还没有提交过新任务。点左下角“新建监控任务”，按格式填写后交给后台 Claude 办理。";
-    s["summary"] = count ? std::to_string(count) + " 个请求" : "";
-    s["notes"] = array{}; s["extras"] = array{}; s["table"] = std::move(tb); s["attention"] = array{};
-    s["working"] = nullptr; s["done"] = false; s["takeovers"] = array{}; s["next"] = nullptr;
+    s["updated"]=updated>0?value(updated):value(nullptr);
+    s["headline"]=requests.empty()?"还没有提交过新任务。点左下角“新建监控任务”，按格式填写后交给后台 Claude 办理。":"交给后台 Claude 设置的监控任务。办好后，新项目会出现在左侧“项目”里。";
+    s["summary"]=requests.empty()?"":std::to_string(requests.size())+" 个请求";
+    s["notes"]=array{};s["extras"]=array{};s["table"]=std::move(table);s["attention"]=std::move(attention);
+    s["working"]=any_running?value("后台 Claude 正在设置新监控"):value(nullptr);
+    s["done"]=false;s["takeovers"]=tks;s["next"]=nullptr;
     return s;
 }
 
@@ -957,7 +1088,7 @@ json::array takeovers(const object& p, const SystemInfo& system, const RuntimePa
 
 json::object snapshot(const object& p, const SystemInfo& system, const RuntimePaths& paths) {
     const auto runner=runner_info(p,system,paths); const auto adapter=str(p.if_contains("adapter"),"runner_only"); object s;
-    if(adapter=="generic")s=generic_adapter(p,runner); else if(adapter=="markdown")s=markdown_adapter(p,system,runner,paths); else if(adapter=="qoi")s=qoi_adapter(p,system,runner,paths); else if(adapter=="setup")s=setup_adapter(paths); else if(adapter=="runner_only")s=runner_only_adapter(runner); else {s=runner_only_adapter(runner);s["error"]="C++ 尚未迁移 adapter："+adapter;}
+    if(adapter=="generic")s=generic_adapter(p,runner); else if(adapter=="markdown")s=markdown_adapter(p,system,runner,paths); else if(adapter=="qoi")s=qoi_adapter(p,system,runner,paths); else if(adapter=="setup")s=setup_adapter(system,paths); else if(adapter=="runner_only")s=runner_only_adapter(runner); else {s=runner_only_adapter(runner);s["error"]="C++ 尚未迁移 adapter："+adapter;}
     s["runner"]=runner_json(runner); s["results_list"]=result_list(p,s);
     std::optional<double> updated; if(const auto* v=s.if_contains("updated");v&&v->is_double())updated=v->as_double();
     const bool stale=updated&&runner.interval_min&&!runner.paused&&adapter!="setup"&&(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count()-*updated>(2**runner.interval_min+30)*60.0);
