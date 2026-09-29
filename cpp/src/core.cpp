@@ -108,8 +108,14 @@ object generic_adapter(const object& p, const RunnerInfo& runner) {
     }
     tags.resize(rows.size());
 
+    array row_meta;
+    if (const auto* src = obj(st.if_contains("table"))) {
+        if (const auto* a = arr(src->if_contains("row_meta"))) for (const auto& x : *a) row_meta.emplace_back(x.is_object() ? value(x.as_object()) : value(object{}));
+    }
+    while (row_meta.size() < rows.size()) row_meta.emplace_back(object{});
+    if (row_meta.size() > rows.size()) row_meta.resize(rows.size());
     object table;
-    table["cols"] = std::move(cols); table["rows"] = std::move(rows); table["tags"] = json_strings(tags);
+    table["cols"] = std::move(cols); table["rows"] = std::move(rows); table["tags"] = json_strings(tags); table["row_meta"] = std::move(row_meta);
     object snap;
     snap["updated"] = updated ? value(*updated) : value(nullptr);
     snap["headline"] = str(st.if_contains("headline"));
