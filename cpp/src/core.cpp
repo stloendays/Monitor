@@ -533,6 +533,184 @@ object markdown_adapter(const object& p,const SystemInfo& system,const RunnerInf
     return snap;
 }
 
+std::string qoi_status_label(const std::string& status){
+    static const std::vector<std::pair<std::string,std::string>> labels={
+        {"COMPLETE","已完成并推送"},
+        {"RESULTS_WRITTEN_NOT_PUSHED","结果已写，待推送"},
+        {"TAKEOVER_ACTIVE","后台处理中"},
+        {"CHECKPOINTS_DONE_NO_RESULTS","计算完成，待汇总"},
+        {"RETRY_FAILED_ITEMS","重试失败项"},
+        {"DEAD","进程停止"},
+        {"RUNNING","运行中"},
+    };
+    for(const auto& [prefix,label]:labels)if(status.rfind(prefix,0)==0)return label;
+    return status;
+}
+
+std::string compact_decimal(double value,int precision=1){
+    std::ostringstream os;os<<std::fixed<<std::setprecision(precision)<<value;
+    auto s=os.str();
+    if(auto p=s.find('.');p!=std::string::npos){
+        while(!s.empty()&&s.back()=='0')s.pop_back();
+        if(!s.empty()&&s.back()=='.')s.pop_back();
+    }
+    return s;
+}
+
+std::string epoch_mmdd_hm(double epoch){
+    const auto t=static_cast<std::time_t>(epoch);std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm,&t);
+#else
+    localtime_r(&t,&tm);
+#endif
+    std::ostringstream os;os<<std::put_time(&tm,"%m-%d %H:%M");return os.str();
+}
+
+std::optional<double> qoi_live_time(const value* v){
+    if(!v)return std::nullopt;
+    if(v->is_double())return v->as_double();
+    if(v->is_int64())return static_cast<double>(v->as_int64());
+    if(v->is_uint64())return static_cast<double>(v->as_uint64());
+    if(v->is_string())return parse_iso_local_seconds(str(v));
+    return std::nullopt;
+}
+
+object qoi_adapter(const object& p,const SystemInfo& system,const RunnerInfo& runner,const RuntimePaths& paths){
+    const fs::path path=str(p.if_contains("status_json"));
+    object st;
+    if(auto v=read_json(path);v&&v->is_object())st=v->as_object();
+    auto updated=parse_iso_local_seconds(str(st.if_contains("updated")));
+    if(!updated)updated=mtime_seconds(path);
+
+    const auto* rows=arr(st.if_contains("rows"));
+    const auto* live=obj(st.if_contains("live"));
+    array out_rows,tags,row_meta;
+    int done_n=0;
+    std::vector<std::string> running_summary;
+
+    if(rows)for(const auto& rv:*rows){
+        if(!rv.is_object())continue;
+        const auto& r=rv.as_object();
+        const auto job=str(r.if_contains("job"));
+        const auto status=str(r.if_contains("status"));
+        const object* lr=nullptr;
+        if(live){
+            if(const auto* lv=live->if_contains(job);lv&&lv->is_object())lr=&lv->as_object();
+        }
+
+        const int checkpoints=lr?integer(lr->if_contains("checkpoints")).value_or(integer(r.if_contains("checkpoints")).value_or(0)):
+                                 integer(r.if_contains("checkpoints")).value_or(0);
+        const int failures=lr?integer(lr->if_contains("failures")).value_or(integer(r.if_contains("failures")).value_or(0)):
+                              integer(r.if_contains("failures")).value_or(0);
+        const int total=integer(r.if_contains("total")).value_or(0);
+        std::string pct="0";
+        if(total){
+            if(checkpoints>=total)pct="100";
+            else pct=compact_decimal(100.0*checkpoints/total);
+        }
+
+        std::optional<double> newest;
+        if(lr){
+            newest=qoi_live_time(lr->if_contains("newest_checkpoint"));
+            if(!newest)newest=qoi_live_time(lr->if_contains("newest_checkpoint_epoch"));
+        }
+        std::string last="—";
+        if(newest)last=ago(*newest);
+        else if(const auto min=integer(r.if_contains("last_checkpoint_min_ago")))last=std::to_string(*min)+" 分钟前";
+
+        std::string rate="—";
+        if(const auto* v=r.if_contains("rate_per_h")){
+            if(v->is_double()&&v->as_double()!=0)rate=compact_decimal(v->as_double(),3);
+            else if(v->is_int64()&&v->as_int64()!=0)rate=std::to_string(v->as_int64());
+            else if(v->is_uint64()&&v->as_uint64()!=0)rate=std::to_string(v->as_uint64());
+            else if(v->is_string()&&!str(v).empty())rate=str(v);
+        }
+
+        std::string eta="—";
+        if(const auto* v=r.if_contains("eta_h")){
+            double n=0;bool has=false;
+            if(v->is_double()){n=v->as_double();has=n!=0;}
+            else if(v->is_int64()){n=static_cast<double>(v->as_int64());has=n!=0;}
+            else if(v->is_uint64()){n=static_cast<double>(v->as_uint64());has=n!=0;}
+            if(has){std::ostringstream os;os<<std::fixed<<std::setprecision(1)<<n<<" 小时";eta=os.str();}
+        }
+
+        array row;
+        row.emplace_back(job);
+        row.emplace_back(qoi_status_label(status));
+        row.emplace_back(std::to_string(checkpoints)+" / "+std::to_string(total)+"（"+pct+"%）");
+        row.emplace_back(std::to_string(failures));
+        row.emplace_back(rate);
+        row.emplace_back(eta);
+        row.emplace_back(last);
+        row.emplace_back(boolean(r.if_contains("branch_pushed"))?"是":"否");
+        out_rows.emplace_back(std::move(row));
+
+        std::string tag;
+        if(status=="COMPLETE"){tag="done";++done_n;}
+        else if(status.rfind("DEAD",0)==0)tag="bad";
+        else if(status.rfind("RUNNING",0)==0)tag="run";
+        tags.emplace_back(tag);
+
+        object meta;
+        meta["task_id"]=job;
+        if(const auto* params=r.if_contains("params");params&&params->is_object())meta["params"]=params->as_object();
+        if(const auto* workdir=r.if_contains("workdir");workdir&&workdir->is_string())meta["open_path"]=str(workdir);
+        if(const auto* log=r.if_contains("log");log&&log->is_string())meta["log"]=str(log);
+        if(const auto* result=r.if_contains("result");result&&result->is_string())meta["result"]=str(result);
+        row_meta.emplace_back(std::move(meta));
+
+        if(status.rfind("RUNNING",0)==0){
+            std::string part=job+" "+pct+"%";
+            if(eta!="—")part+="，约 "+eta;
+            running_summary.push_back(std::move(part));
+        }
+    }
+
+    const auto total_jobs=rows?static_cast<int>(rows->size()):0;
+    object table;
+    table["cols"]=array{"作业","状态","进度（实时）","失败","速率（个/小时）","预计剩余","最近检查点","已推送"};
+    table["rows"]=std::move(out_rows);
+    table["tags"]=std::move(tags);
+    table["row_meta"]=std::move(row_meta);
+
+    object snap;
+    snap["updated"]=updated?value(*updated):value(nullptr);
+    snap["notes"]=array{};
+    snap["extras"]=array{};
+    snap["table"]=std::move(table);
+    std::string summary=std::to_string(done_n)+"/"+std::to_string(total_jobs)+" 个作业已完成";
+    if(!running_summary.empty())summary+="；"+join(running_summary,"；")+" 进行中";
+    snap["summary"]=summary;
+    snap["headline"]=total_jobs&&done_n==total_jobs?
+        "所有作业都已完成并推送。":
+        "计算在跑，监控"+every(runner.interval_min.value_or(15))+"检查一次，出问题会自动重启或请后台 Claude 处理。";
+
+    array attention;
+    if(const auto* notify=arr(st.if_contains("notify")))for(const auto& x:*notify)attention.emplace_back("[需要你处理] "+str(&x));
+    snap["attention"]=std::move(attention);
+
+    std::vector<std::string> items;
+    if(const auto* pending=arr(st.if_contains("attention")))for(const auto& x:*pending){
+        if(x.is_array()){
+            const auto& a=x.as_array();
+            if(a.size()>=3)items.push_back(str(&a[0])+" "+str(&a[1])+"："+str(&a[2]));
+        }else if(x.is_string())items.push_back(str(&x));
+    }
+    if(const auto* tk=obj(st.if_contains("takeover"))){
+        snap["working"]="后台 Claude 正在处理 "+str(tk->if_contains("key"));
+    }else if(!items.empty()){
+        snap["working"]="监控发现问题，将请后台 Claude 处理："+join(items,"；");
+    }else snap["working"]=nullptr;
+
+    if(updated&&runner.running)snap["next"]=epoch_mmdd_hm(*updated+runner.interval_min.value_or(15)*60.0);
+    else snap["next"]=nullptr;
+    snap["done"]=total_jobs>0&&done_n==total_jobs;
+    snap["takeovers"]=takeovers(p,system,paths);
+    return snap;
+}
+
 object generic_adapter(const object& p, const RunnerInfo& runner) {
     const fs::path path = str(p.if_contains("status_json"));
     object st;
@@ -779,7 +957,7 @@ json::array takeovers(const object& p, const SystemInfo& system, const RuntimePa
 
 json::object snapshot(const object& p, const SystemInfo& system, const RuntimePaths& paths) {
     const auto runner=runner_info(p,system,paths); const auto adapter=str(p.if_contains("adapter"),"runner_only"); object s;
-    if(adapter=="generic")s=generic_adapter(p,runner); else if(adapter=="markdown")s=markdown_adapter(p,system,runner,paths); else if(adapter=="setup")s=setup_adapter(paths); else if(adapter=="runner_only")s=runner_only_adapter(runner); else {s=runner_only_adapter(runner);s["error"]="C++ 尚未迁移 adapter："+adapter;}
+    if(adapter=="generic")s=generic_adapter(p,runner); else if(adapter=="markdown")s=markdown_adapter(p,system,runner,paths); else if(adapter=="qoi")s=qoi_adapter(p,system,runner,paths); else if(adapter=="setup")s=setup_adapter(paths); else if(adapter=="runner_only")s=runner_only_adapter(runner); else {s=runner_only_adapter(runner);s["error"]="C++ 尚未迁移 adapter："+adapter;}
     s["runner"]=runner_json(runner); s["results_list"]=result_list(p,s);
     std::optional<double> updated; if(const auto* v=s.if_contains("updated");v&&v->is_double())updated=v->as_double();
     const bool stale=updated&&runner.interval_min&&!runner.paused&&adapter!="setup"&&(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count()-*updated>(2**runner.interval_min+30)*60.0);
