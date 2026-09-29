@@ -140,7 +140,11 @@ Copy-Tree $stage $payload
 
 $manifestFiles = @()
 Get-ChildItem -LiteralPath $payload -Recurse -Force -File | Sort-Object FullName | ForEach-Object {
-    $relative = [System.IO.Path]::GetRelativePath($payload, $_.FullName).Replace("\", "/")
+    $relative = $_.FullName.Substring($payload.Length)
+    $relative = $relative.TrimStart([char[]]@(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )).Replace("\\", "/")
     $manifestFiles += [ordered]@{
         path = $relative
         size = $_.Length
