@@ -27,7 +27,8 @@ The optional `monitor_hub_qt` target currently provides a read-only operational 
 - persistent close-to-tray and notification settings;
 - user-controlled Windows launch-at-login with development-checkout protection;
 - important project-health transition notifications;
-- copyable desktop diagnostics and `--desktop-diagnostics`.
+- copyable desktop diagnostics and `--desktop-diagnostics`;
+- CMake install layout plus updater-compatible ZIP, portable ZIP, and per-user NSIS installer packaging.
 
 The Python/Tkinter app remains the production fallback until the remaining surfaces reach parity.
 
@@ -40,7 +41,7 @@ The Qt UI follows `docs/UI_GUIDELINES.md`:
 - panel-level help uses a small info button;
 - errors are never hidden inside a tooltip.
 
-Desktop lifecycle behavior is documented separately in `docs/DESKTOP_LIFECYCLE.md`.
+Desktop lifecycle behavior is documented separately in `docs/DESKTOP_LIFECYCLE.md`. Windows packaging and installer behavior is documented in `docs/WINDOWS_PACKAGING.md`.
 
 ## Build
 
@@ -84,7 +85,6 @@ The following still stay in Python or in later desktop/release phases:
 - new-monitor setup-agent launching;
 - Markdown and QoI-specific adapters;
 - rich transcript rendering / follow mode;
-- installer/shortcut icon packaging;
 - issue-level and agent-run event notifications beyond project-health transitions;
 - updater restart integration and packaged release installation;
 - application log-file / diagnostics viewer integration;

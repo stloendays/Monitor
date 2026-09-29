@@ -20,7 +20,8 @@ The desktop lifecycle layer is intentionally separate from monitoring/business l
 - a tray Settings dialog;
 - copyable desktop diagnostics;
 - repository-owned PNG/SVG icon resources for the Qt window and tray;
-- a native Windows `.ico` resource embedded into the Qt executable.
+- a native Windows `.ico` resource embedded into the Qt executable;
+- a per-user installer and portable/update package path derived from one CMake install tree.
 
 The controller/settings code lives in `qt_desktop_controller.*` and
 `qt_desktop_settings.*`; the monitoring window does not own process-lifecycle policy.
@@ -137,13 +138,11 @@ It does not modify startup registration or settings.
 
 This phase does **not** yet add:
 
-- installer/shortcut creation;
 - an application log file / log viewer;
 - issue-level and agent-run-level event notifications;
 - updater restart integration;
 - crash-session recovery journals;
 - persisted window geometry and last-open project;
-- packaged Release installation smoke tests.
 
 Those should be layered on top of the current controller/settings boundary rather than
 implemented inside `QtMainWindow`.
@@ -168,5 +167,4 @@ At minimum:
 14. Notification polling establishes a silent baseline before reporting transitions.
 15. The Qt window/tray and native Windows executable use repository-owned icon assets.
 
-The packaged-build release path should later repeat these checks outside the developer
-build tree.
+The Windows packaging workflow now repeats diagnostics from a staged install and a silently installed NSIS build. Stable GitHub Release publishing remains a separate gated integration step.

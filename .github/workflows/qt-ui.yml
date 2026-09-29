@@ -10,6 +10,8 @@ on:
       - 'cpp/**'
       - 'docs/DESKTOP_LIFECYCLE.md'
       - 'docs/QT_MIGRATION.md'
+      - 'docs/WINDOWS_PACKAGING.md'
+      - 'packaging/windows/**'
       - '.github/workflows/qt-ui.yml'
 
 jobs:
@@ -45,3 +47,66 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & ".\cpp\build-qt\Release\monitor_hub_qt.exe" --desktop-diagnostics
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Package Windows desktop
+        shell: pwsh
+        run: |
+          $qt = Join-Path $env:RUNNER_TEMP "Qt\6.8.3\msvc2022_64\bin"
+          powershell -ExecutionPolicy Bypass -File packaging/windows/package_qt.ps1 -RepoRoot . -BuildDir cpp/build-qt -QtBin "$qt" -OutDir dist -BuildInstaller
+
+      - name: Verify update package contract
+        shell: pwsh
+        run: |
+          $verify = Join-Path $env:RUNNER_TEMP "MonitorHubUpdateVerify"
+          if (Test-Path $verify) { Remove-Item $verify -Recurse -Force }
+          Expand-Archive -LiteralPath .\dist\monitor-hub-windows-x64.zip -DestinationPath $verify
+          $manifest = Get-Content (Join-Path $verify "manifest.json") -Raw | ConvertFrom-Json
+          if ($manifest.format -ne 1) { throw "unsupported manifest format" }
+          foreach ($entry in $manifest.files) {
+            $path = Join-Path (Join-Path $verify "payload") ($entry.path -replace '/', '\')
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing payload file: $($entry.path)" }
+            $item = Get-Item -LiteralPath $path
+            if ($item.Length -ne [int64]$entry.size) { throw "size mismatch: $($entry.path)" }
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+            if ($hash -ne [string]$entry.sha256) { throw "hash mismatch: $($entry.path)" }
+          }
+          if (-not (Test-Path (Join-Path $verify "payload\.monitor-hub-release.json"))) { throw "release marker missing" }
+          if (-not (Test-Path .\dist\monitor-hub-windows-x64.zip.sha256)) { throw "archive checksum missing" }
+
+      - name: Installed package smoke test
+        shell: pwsh
+        run: |
+          $diagnostics = & ".\dist\stage\bin\monitor_hub_qt.exe" --desktop-diagnostics
+          $versionLine = $diagnostics | Where-Object { $_ -match '^version=' } | Select-Object -First 1
+          if (-not $versionLine) { throw "staged app did not report version" }
+          $version = ($versionLine -replace '^version=', '').Trim()
+          $installer = ".\dist\Monitor-Hub-$version-win64-setup.exe"
+          if (-not (Test-Path -LiteralPath $installer)) { throw "installer missing: $installer" }
+          $installDir = Join-Path $env:RUNNER_TEMP "MonitorHubInstalled"
+          if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
+          $install = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "installer failed: $($install.ExitCode)" }
+          $installedExe = Join-Path $installDir "bin\monitor_hub_qt.exe"
+          if (-not (Test-Path -LiteralPath $installedExe)) { throw "installed executable missing" }
+          & $installedExe --desktop-diagnostics
+          if ($LASTEXITCODE -ne 0) { throw "installed diagnostics failed" }
+          $uninstaller = Join-Path $installDir "Uninstall.exe"
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "uninstaller failed: $($uninstall.ExitCode)" }
+          Start-Sleep -Seconds 1
+          if (Test-Path -LiteralPath $installedExe) { throw "installed executable remained after uninstall" }
+
+      - name: Upload packaging artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-hub-windows-package
+          path: |
+            dist/monitor-hub-windows-x64.zip
+            dist/monitor-hub-windows-x64.zip.sha256
+            dist/Monitor-Hub-*-win64-portable.zip
+            dist/Monitor-Hub-*-win64-setup.exe
+          if-no-files-found: error

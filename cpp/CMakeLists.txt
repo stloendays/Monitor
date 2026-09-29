@@ -28,6 +28,7 @@ endif()
 
 add_executable(monitor_hub_cli src/main.cpp)
 target_link_libraries(monitor_hub_cli PRIVATE monitor_hub_core)
+install(TARGETS monitor_hub_cli RUNTIME DESTINATION bin)
 
 option(MONITOR_HUB_BUILD_QT "Build the Qt 6 desktop UI" OFF)
 if(MONITOR_HUB_BUILD_QT)
@@ -67,6 +68,7 @@ if(MONITOR_HUB_BUILD_QT)
     else()
         target_compile_options(monitor_hub_qt PRIVATE -Wall -Wextra -Wpedantic)
     endif()
+    install(TARGETS monitor_hub_qt RUNTIME DESTINATION bin)
 endif()
 
 include(CTest)
