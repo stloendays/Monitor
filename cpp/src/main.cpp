@@ -5,6 +5,10 @@
 #include <iostream>
 #include <string>
 
+#ifndef MONITOR_HUB_VERSION
+#define MONITOR_HUB_VERSION "0.0.0"
+#endif
+
 int main(int argc, char** argv) {
     try {
         auto paths = monitor_hub::runtime_paths_from_env(argc > 0 ? std::filesystem::path(argv[0]) : std::filesystem::path{});
@@ -18,8 +22,11 @@ int main(int argc, char** argv) {
             else if (arg == "--job-root" && i + 1 < argc) paths.job_root = argv[++i];
             else if (arg == "--no-discovery") paths.discovery = false;
             else if (arg == "--system-info" && i + 1 < argc) system = monitor_hub::load_system_info_fixture(argv[++i]);
-            else if (arg == "--help" || arg == "-h") {
-                std::cout << "monitor_hub_cli [--dump] [--registry FILE] [--hub-data DIR] [--no-discovery] [--system-info FILE]\n";
+            else if (arg == "--version") {
+                std::cout << MONITOR_HUB_VERSION << "\n";
+                return 0;
+            } else if (arg == "--help" || arg == "-h") {
+                std::cout << "monitor_hub_cli [--dump] [--version] [--registry FILE] [--hub-data DIR] [--no-discovery] [--system-info FILE]\n";
                 return 0;
             } else {
                 std::cerr << "unknown argument: " << arg << "\n";
