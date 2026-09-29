@@ -1497,6 +1497,7 @@ class Hub(tk.Tk):
             notes = [(s.get("headline", ""), None)] + notes
         self._pg_base_notes = notes or [("（没有备注）", None)]
         self._set(self.pg_notes, self._pg_base_notes)
+        self._show_progress_task_meta()
         # takeovers
         self._set_tooltip(self.tk_info, ("每个新任务请求由一个后台 Claude 办理：写监控脚本、登记到总台、启动监控并做第一轮检查。左边选一个请求，右边显示它每一步做了什么。"
                                          if p.get("builtin") else
@@ -1767,11 +1768,13 @@ class Hub(tk.Tk):
         w.title("新建监控任务")
         w.geometry("1000x820")
         w.configure(bg="white")
-        tk.Label(w, text="新建监控任务", font=(UI, 16, "bold"), fg=INK, bg="white").pack(anchor="w", padx=16, pady=(12, 2))
-        tk.Label(w, text="按下面的格式在冒号后面填写（写不全也可以，Claude 会先读项目目录里的文件再办理）。填好后有两种提交方式：\n"
-                         "① 复制下来，粘贴给和 Claude 的对话；② 直接交给后台 Claude 办理，过程显示在“新任务办理”里。\n"
-                         "办理内容：写监控脚本、登记到总台、按你给的间隔启动监控；之后出问题自动处理，全部完成后把最终结果写好并显示在“最终结果”页。",
-                 font=(UI, 11), fg=INK, bg="white", justify="left", anchor="w").pack(fill="x", padx=16)
+        titlebar = tk.Frame(w, bg="white")
+        titlebar.pack(fill="x", padx=16, pady=(12, 2))
+        tk.Label(titlebar, text="新建监控任务", font=(UI, 16, "bold"), fg=INK, bg="white").pack(side="left")
+        info = self._info_button(titlebar, "按模板在冒号后填写；写不全也可以，后台 Claude 会先读取项目目录里的现有文件。\n\n"
+                                                  "提交方式：可以复制后粘贴到 Claude 对话，也可以直接交给后台 Claude 办理。\n\n"
+                                                  "后台办理包括：写监控脚本、登记到总台、按指定周期启动监控，并按你的允许/禁止范围处理后续问题。")
+        info.pack(side="right")
         f, t = self._textbox(w, height=22, font=(UI, 12), editable=True)
         f.pack(fill="both", expand=True, padx=16, pady=8)
         t.insert("1.0", REQUEST_TEMPLATE)
