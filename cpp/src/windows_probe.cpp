@@ -9,6 +9,8 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cwchar>
 #include <iomanip>
 #include <sstream>
 #include <string>
