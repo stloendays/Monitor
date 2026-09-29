@@ -1,8 +1,12 @@
 name: C++ core
 
+concurrency:
+  group: cpp-core-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
-    branches: [main, cpp-migration-phase1]
+    branches: [main]
     paths:
       - 'cpp/**'
       - 'hub/**'
