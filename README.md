@@ -42,6 +42,7 @@ pythonw hub\monitor_hub.py
 - 可直接照抄的完整状态示例：[hub/hub_status.example.json](hub/hub_status.example.json)。新 monitor 建议写 `schema_version: 1`。
 - 写完状态文件后可运行 `python hub/validate_status.py <path-to-hub_status.json>` 做结构检查；格式错误会返回非零退出码。
 - 新监控脚本 / 定时任务的机器可读命名规范见 [docs/MONITOR_NAMING.md](docs/MONITOR_NAMING.md)。
+- 旧 QoI `status.json` 的兼容/迁移规则见 [docs/QOI_ADAPTER.md](docs/QOI_ADAPTER.md)，数据化实时示例在 [hub/qoi_status.example.json](hub/qoi_status.example.json)。
 - 界面把运行状态与帮助文案分开：状态常驻，说明性文字使用按钮 hover tooltip；规则见 [docs/UI_GUIDELINES.md](docs/UI_GUIDELINES.md)。
 
 不想碰真实项目、只想先看效果：

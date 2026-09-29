@@ -1,0 +1,50 @@
+{
+  "updated": "2026-09-29T10:00:00",
+  "rows": [
+    {
+      "job": "density-fold1",
+      "status": "COMPLETE",
+      "checkpoints": 1200,
+      "failures": 0,
+      "total": 1200,
+      "last_checkpoint_min_ago": 18,
+      "rate_per_h": 142.5,
+      "eta_h": 0,
+      "branch_pushed": true,
+      "workdir": "D:\\Research\\QoI\\fold1",
+      "result": "D:\\Research\\QoI\\results\\fold1.md",
+      "params": {
+        "fold": 1,
+        "seed": 42,
+        "batch_size": 64
+      }
+    },
+    {
+      "job": "density-fold2",
+      "status": "RUNNING",
+      "checkpoints": 610,
+      "failures": 1,
+      "total": 1200,
+      "last_checkpoint_min_ago": 9,
+      "rate_per_h": 138.2,
+      "eta_h": 4.3,
+      "branch_pushed": false,
+      "workdir": "D:\\Research\\QoI\\fold2",
+      "log": "D:\\Research\\QoI\\fold2\\worker.log",
+      "params": {
+        "fold": 2,
+        "seed": 43,
+        "batch_size": 64
+      }
+    }
+  ],
+  "live": {
+    "density-fold2": {
+      "checkpoints": 642,
+      "failures": 1,
+      "newest_checkpoint": "2026-09-29T09:58:00"
+    }
+  },
+  "notify": [],
+  "attention": []
+}
