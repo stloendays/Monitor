@@ -29,7 +29,8 @@ def interval_minutes(token):
 
 
 def parse_monitor_name(name):
-    base = os.path.basename(str(name or ""))
+    raw = str(name or "")
+    base = os.path.basename(raw.replace("\\", "/"))
     m = SCRIPT_RE.fullmatch(base) or RUNNER_RE.fullmatch(base)
     if not m:
         return {}
@@ -38,7 +39,6 @@ def parse_monitor_name(name):
     d["display_name"] = f"{d['project']} · {d['scope']} monitor"
     d["canonical"] = True
     return d
-
 
 
 def read_monitor_meta(path):
@@ -62,7 +62,7 @@ def read_monitor_meta(path):
 
 def action_script_path(action):
     """Return the first .py token in a runner action, preserving Windows paths."""
-    m = re.search(r'(?:"([^"]+\\.py)"|\'([^\']+\\.py)\'|([^\\s]+\\.py))', str(action or ""), re.I)
+    m = re.search(r"""(?:"([^"]+\.py)"|'([^']+\.py)'|([^\s]+\.py))""", str(action or ""), re.I)
     if not m:
         return ""
     return next((x for x in m.groups() if x), "").strip("()[]{};,")
