@@ -8,6 +8,12 @@ The optional `monitor_hub_qt` target currently provides a read-only operational 
 
 - live refresh from Windows Task Scheduler + WMI;
 - project sidebar with health state;
+- cross-project **Overview / control-tower** page;
+- overview project-health and progress aggregation;
+- cross-project **需要处理** queue built from normalized attention/error/stale state;
+- cross-project recent Agent/takeover activity;
+- double-click drill-down from Overview into the corresponding project;
+- raw takeover evidence can be opened from the project takeover table;
 - project headline and runner state;
 - progress table;
 - dedicated task-detail pane;
@@ -30,6 +36,8 @@ The optional `monitor_hub_qt` target currently provides a read-only operational 
 - copyable desktop diagnostics and `--desktop-diagnostics`;
 - CMake install layout plus updater-compatible ZIP, portable ZIP, and per-user NSIS installer packaging.
 
+The Overview model is a read-only projection over normalized project snapshots and takeover records. It does **not** parse raw project logs or invent separate health semantics in the UI.
+
 The Python/Tkinter app remains the production fallback until the remaining surfaces reach parity.
 
 ## UI rule
@@ -39,7 +47,8 @@ The Qt UI follows `docs/UI_GUIDELINES.md`:
 - operational state, warnings and required decisions remain visible;
 - explanatory copy belongs in hover tooltips;
 - panel-level help uses a small info button;
-- errors are never hidden inside a tooltip.
+- errors are never hidden inside a tooltip;
+- raw evidence remains a drill-down surface rather than the primary Overview UX.
 
 Desktop lifecycle behavior is documented separately in `docs/DESKTOP_LIFECYCLE.md`. Windows packaging and installer behavior is documented in `docs/WINDOWS_PACKAGING.md`.
 
@@ -76,6 +85,8 @@ cmake --build cpp/build --config Release
 ctest --test-dir cpp/build -C Release --output-on-failure
 ```
 
+The cross-project Overview aggregation is covered by `monitor_hub_core_tests`, so status/attention/activity grouping can be validated without Qt.
+
 ## Not migrated yet
 
 The following still stay in Python or in later desktop/release phases:
@@ -85,7 +96,9 @@ The following still stay in Python or in later desktop/release phases:
 - new-monitor setup-agent launching;
 - Markdown and QoI-specific adapters;
 - rich transcript rendering / follow mode;
-- issue-level and agent-run event notifications beyond project-health transitions;
+- first-class Issue / AgentRun / Event timeline views driven by `AGENT_EVENT_PROTOCOL`;
+- durable Attention/outbox semantics beyond current snapshot-derived attention;
+- issue-level and agent-run desktop notifications beyond project-health transitions;
 - updater restart integration and packaged release installation;
 - application log-file / diagnostics viewer integration;
 - crash-session recovery journals;
