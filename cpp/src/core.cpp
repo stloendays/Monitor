@@ -219,7 +219,7 @@ object generic_adapter(const object& p, const RunnerInfo& runner) {
     snap["attention"] = json_strings(strings(st.if_contains("attention")));
     const auto working = str(st.if_contains("working"));
     snap["working"] = working.empty() ? value(nullptr) : value(working);
-    snap["done"] = boolean(st.if_contains("done"));
+    snap["done"] = boolean(st.if_contains("done")) && issues.errors.empty();
     snap["results"] = st.if_contains("results") && st.at("results").is_array() ? st.at("results") : value(array{});
     const auto next = str(st.if_contains("next"));
     if (runner.next) snap["next"] = short_time(*runner.next);
