@@ -32,9 +32,10 @@ jobs:
       - name: Python contract checks
         shell: pwsh
         run: |
-          python -m py_compile hub/monitor_hub.py hub/naming.py hub/status_contract.py tests/demo/make_demo.py tests/naming_test.py tests/status_contract_test.py
+          python -m py_compile hub/monitor_hub.py hub/naming.py hub/status_contract.py hub/validate_status.py tests/demo/make_demo.py tests/naming_test.py tests/status_contract_test.py
           python tests/naming_test.py
           python tests/status_contract_test.py
+          python hub/validate_status.py hub/hub_status.example.json
       - name: Configure
         shell: pwsh
         run: cmake -S cpp -B cpp/build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
