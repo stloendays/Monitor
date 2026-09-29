@@ -591,6 +591,13 @@ std::vector<object> load_projects(const SystemInfo& system, const RuntimePaths& 
     object setup; setup["id"]="hub-setup";setup["name"]="新任务办理";setup["area"]="交给后台 Claude 设置的新监控";setup["adapter"]="setup";object r;r["kind"]="none";setup["runner"]=r;setup["runner_text"]="点左下角“新建监控任务”提交；每个请求由一个后台 Claude 办理";setup["dir"]=(paths.hub_data/"requests").string();setup["builtin"]=true;out.push_back(std::move(setup));
     if(!paths.discovery)return out;
     for(const auto& [name,t]:system.tasks){bool known=false;for(const auto& p:out)if(const auto* pr=obj(p.if_contains("runner"));pr&&str(pr->if_contains("kind"))=="schtask"&&str(pr->if_contains("name"))==name)known=true;if(known)continue;object p;p["id"]="task:"+name;p["name"]=name;p["area"]="其他监控 · 定时任务";p["adapter"]="runner_only";object rr;rr["kind"]="schtask";rr["name"]=name;p["runner"]=rr;p["action"]=t.action;p["unregistered"]=true;out.push_back(std::move(p));}
+    std::error_code ec;
+    if(fs::is_directory(paths.job_root,ec)&&!ec) for(const auto& entry:fs::directory_iterator(paths.job_root,ec)){
+        if(ec)break;if(!entry.is_directory(ec)||ec)continue;const auto name=entry.path().filename().string();if(lower(name).find("monitor")==std::string::npos)continue;
+        bool known=false;for(const auto& p:out)if(const auto* pr=obj(p.if_contains("runner"));pr&&str(pr->if_contains("kind"))=="detach"&&str(pr->if_contains("name"))==name)known=true;if(known)continue;
+        object p;p["id"]="job:"+name;p["name"]=name;p["area"]="其他监控 · 后台作业";p["adapter"]="runner_only";object rr;rr["kind"]="detach";rr["name"]=name;p["runner"]=rr;
+        p["action"]=read_tail(entry.path()/"run.ps1",1200);p["unregistered"]=true;out.push_back(std::move(p));
+    }
     return out;
 }
 
