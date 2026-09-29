@@ -139,6 +139,77 @@ int main() {
     assert(it->at("area").as_string() == "其他监控 · 后台作业 · local");
     assert(it->at("runner").as_object().at("interval_min").as_int64() == 15);
 
+    // Legacy Markdown adapter: first table, row classification, notes, DONE and next-check text.
+    const auto md_status = root / "status_latest.md";
+    const auto md_done = root / "DONE";
+    write_file(md_status,
+        "# Vanda monitor\n"
+        "计算正常，没有需要处理的事。\n\n"
+        "| 作业 | 状态 | 进度 | 能量 |\n"
+        "|---|---|---|---|\n"
+        "| slab_clean | 完成 | 最终单点 | -247.1 |\n"
+        "| slab_CO | R 02:14 | 离子步 31 | -262.8 |\n"
+        "| outside | R | 非监控 | — |\n\n"
+        "下次检查：09-29 18:00\n\n"
+        "**备注**\n"
+        "- scratch 正常\n");
+    write_file(md_done, "DONE\n");
+    json::object mp;
+    mp["id"] = "markdown-demo";
+    mp["name"] = "markdown-demo";
+    mp["adapter"] = "markdown";
+    mp["status_md"] = md_status.string();
+    mp["done_file"] = md_done.string();
+    json::object mr;
+    mr["kind"] = "none";
+    mp["runner"] = mr;
+    mp["runner_text"] = "fixture";
+    const auto ms = snapshot(mp, SystemInfo{}, paths);
+    assert(ms.at("health").as_string() == "done");
+    assert(ms.at("summary").as_string() == "完成 1，运行 1；另有 1 个作业不归这个监控管");
+    const auto& mt = ms.at("table").as_object();
+    assert(mt.at("tags").as_array()[0].as_string() == "done");
+    assert(mt.at("tags").as_array()[1].as_string() == "run");
+    assert(mt.at("tags").as_array()[2].as_string() == "other");
+    assert(ms.at("notes").as_array()[0].as_string() == "scratch 正常");
+    assert(ms.at("next").as_string() == "09-29 18:00");
+
+    // Detached takeover: successful result + exit:0 should be indexed as ok.
+    const auto tk_name = std::string("claude-monitor-20260929-1234");
+    const auto tk_dir = paths.job_root / tk_name;
+    fs::create_directories(tk_dir);
+    write_file(tk_dir / "output.log", "{\"type\":\"result\",\"is_error\":false,\"result\":\"finished\\nmore\"}\n");
+    write_file(tk_dir / "exitcode", "0\n");
+    write_file(tk_dir / "started", "started\n");
+    json::object tp;
+    json::object tcfg;
+    tcfg["kind"] = "detach";
+    tcfg["prefix"] = "claude-monitor-";
+    tp["takeovers"] = tcfg;
+    auto tks = takeovers(tp, SystemInfo{}, paths);
+    assert(tks.size() == 1);
+    assert(tks[0].as_object().at("state").as_string() == "ok");
+    assert(tks[0].as_object().at("summary").as_string() == "finished");
+    assert(tks[0].as_object().at("label").as_string() == "09-29 12:34");
+
+    // Glob takeover: parse the final stream-json result and friendly quota error.
+    const auto glob_dir = root / "takeovers";
+    fs::create_directories(glob_dir);
+    const auto glob_log = glob_dir / "claude_takeover_20260929_1250.jsonl";
+    write_file(glob_log, "{\"type\":\"system\",\"subtype\":\"init\"}\n"
+                         "{\"type\":\"result\",\"is_error\":true,\"result\":\"usage limit · resets 15:00\"}\n");
+    json::object gp;
+    json::object gcfg;
+    gcfg["kind"] = "glob";
+    gcfg["pattern"] = (glob_dir / "claude_takeover_*").string();
+    gp["takeovers"] = gcfg;
+    tks = takeovers(gp, SystemInfo{}, paths);
+    assert(tks.size() == 1);
+    assert(tks[0].as_object().at("state").as_string() == "failed");
+    assert(std::string(tks[0].as_object().at("summary").as_string()).find("Claude 额度用完") != std::string::npos);
+    assert(tks[0].as_object().at("kind").as_string() == "jsonl");
+    assert(tks[0].as_object().at("label").as_string() == "09-29 12:50");
+
     fs::remove_all(root);
     std::cout << "core tests passed\n";
     return 0;
