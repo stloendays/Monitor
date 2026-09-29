@@ -48,3 +48,8 @@ $env:MONITOR_HUB_NO_DISCOVERY="1"
 ```
 
 Phase 1 intentionally migrates the deterministic core first. The production Python GUI remains the fallback until the Windows probe and Qt UI have parity tests.
+
+
+## Version and releases
+
+The C++ build no longer owns a separate hard-coded version. CMake reads `../VERSION`, and `monitor_hub_cli --version` exposes the same value used by the Python GUI and GitHub Release workflow. See `docs/UPDATES.md`.
