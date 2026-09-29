@@ -21,6 +21,9 @@ def validate_status(data):
     if not isinstance(data, dict):
         return {"errors": ["根对象必须是 JSON object"], "warnings": []}
 
+    if "schema_version" in data and (not isinstance(data["schema_version"], int) or isinstance(data["schema_version"], bool) or data["schema_version"] < 1):
+        errors.append("schema_version 必须是 >= 1 的整数")
+
     updated = data.get("updated")
     if not isinstance(updated, str) or not updated.strip():
         errors.append("updated 必须是非空 ISO 8601 字符串")
