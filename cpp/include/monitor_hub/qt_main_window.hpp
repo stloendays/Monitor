@@ -34,6 +34,7 @@ public:
 private:
     void build_ui();
     void refresh();
+    void render_overview();
     void render_sidebar();
     void select_project(const std::string& id);
     void render_project();
@@ -62,6 +63,11 @@ private:
     QLabel* headline_ = nullptr;
     QLabel* runner_ = nullptr;
     QTabWidget* tabs_ = nullptr;
+
+    QLabel* overview_counts_ = nullptr;
+    QTableWidget* overview_projects_ = nullptr;
+    QTableWidget* overview_attention_ = nullptr;
+    QTableWidget* overview_agents_ = nullptr;
 
     QTableWidget* progress_ = nullptr;
     QTextEdit* notes_ = nullptr;
