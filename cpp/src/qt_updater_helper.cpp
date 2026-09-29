@@ -112,6 +112,14 @@ QString verify_stage(const QString& stage_dir) {
     }
 
     const QDir payload(stage.filePath(QStringLiteral("payload")));
+    const auto release_marker =
+        read_object(payload.filePath(QStringLiteral(".monitor-hub-release.json")));
+    if (release_marker.value(QStringLiteral("format")).toInt(-1) != 1 ||
+        release_marker.value(QStringLiteral("version")).toString() != version) {
+        throw UpdateFailure(
+            "payload release marker does not match update manifest");
+    }
+
     QSet<QString> seen;
     for (const auto& value : files) {
         if (!value.isObject()) throw UpdateFailure("invalid manifest file entry");
