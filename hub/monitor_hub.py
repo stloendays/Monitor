@@ -994,8 +994,9 @@ class Hub(tk.Tk):
         hs = ttk.Scrollbar(box, orient="horizontal", command=self.pg_tree.xview)
         self.pg_tree.configure(yscrollcommand=vs.set, xscrollcommand=hs.set)
         self.pg_tree.grid(row=0, column=0, sticky="nsew")
-        self.pg_tree.bind("<Double-1>", lambda e: self._open_progress_task())
-        self.pg_tree.bind("<Return>", lambda e: self._open_progress_task())
+        self.pg_tree.bind("<Double-1>", self._open_progress_task)
+        self.pg_tree.bind("<Return>", self._open_progress_task)
+        self.pg_tree.bind("<<TreeviewSelect>>", lambda e: self._show_progress_task_meta())
         vs.grid(row=0, column=1, sticky="ns")
         hs.grid(row=1, column=0, sticky="ew")
         box.rowconfigure(0, weight=1)
@@ -1338,7 +1339,8 @@ class Hub(tk.Tk):
             notes += [("备注：", "bold")] + [("  • " + n, None) for n in s["notes"]]
         if not tb["rows"]:
             notes = [(s.get("headline", ""), None)] + notes
-        self._set(self.pg_notes, notes or [("（没有备注）", None)])
+        self._pg_base_notes = notes or [("（没有备注）", None)]
+        self._set(self.pg_notes, self._pg_base_notes)
         # takeovers
         self.tk_hint.configure(text=("每个新任务请求由一个后台 Claude 办理：写监控脚本、登记到总台、启动监控并做第一轮检查。左边选一个请求，右边显示它每一步做了什么。"
                                      if p.get("builtin") else
@@ -1392,17 +1394,45 @@ class Hub(tk.Tk):
         if lq:
             self.lq_btn.configure(text=lq.get("label", "查询"))
 
-    def _open_progress_task(self):
-        sel = self.pg_tree.selection()
-        iid = sel[0] if sel else self.pg_tree.focus()
-        if not iid:
-            return
+    def _progress_meta(self, iid=None):
+        if iid is None:
+            sel = self.pg_tree.selection()
+            iid = sel[0] if sel else self.pg_tree.focus()
         try:
-            meta = self._pg_meta[int(iid)] if getattr(self, "_pg_meta", None) else {}
+            meta = self._pg_meta[int(iid)] if iid and getattr(self, "_pg_meta", None) else {}
         except (ValueError, IndexError):
             meta = {}
-        if not isinstance(meta, dict):
-            meta = {}
+        return meta if isinstance(meta, dict) else {}
+
+    def _show_progress_task_meta(self):
+        meta = self._progress_meta()
+        lines = list(getattr(self, "_pg_base_notes", []))
+        if not meta:
+            self._set(self.pg_notes, lines)
+            return
+        detail = []
+        for key, label in (("task_id", "任务"), ("job_id", "作业号"), ("host", "主机"), ("script", "脚本"),
+                           ("command", "命令"), ("open_path", "路径"), ("log", "日志"), ("result", "结果")):
+            if meta.get(key):
+                detail.append("%s：%s" % (label, meta[key]))
+        params = meta.get("params")
+        if isinstance(params, dict) and params:
+            detail.append("参数：" + "；".join("%s=%s" % (k, v) for k, v in params.items()))
+        if detail:
+            lines += [("", None), ("任务详情：", "bold")] + [("  " + x, None) for x in detail]
+        self._set(self.pg_notes, lines)
+
+    def _open_progress_task(self, event=None):
+        iid = self.pg_tree.identify_row(event.y) if event is not None and hasattr(event, "y") else None
+        if iid:
+            self.pg_tree.selection_set(iid)
+            self.pg_tree.focus(iid)
+        else:
+            sel = self.pg_tree.selection()
+            iid = sel[0] if sel else self.pg_tree.focus()
+        if not iid:
+            return
+        meta = self._progress_meta(iid)
         target = next((meta.get(k) for k in ("open_path", "path", "workdir", "log", "result") if meta.get(k)), None)
         if target and os.path.exists(target):
             os.startfile(target)
