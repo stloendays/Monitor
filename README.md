@@ -7,6 +7,7 @@
 - **看最终结果**：计算全部完成后，结果表和 RESULTS.md 直接在窗口里打开。
 - **提问**：用中文问这个项目的情况。提问会话是真正只读的（只能读文件，不能运行命令、不能改文件）。
 - **管理监控**：立即检查一次、暂停、恢复、修改检查间隔。
+- **自动更新**：启动后后台检查 GitHub 的正式 Release。Release 安装版可一键下载、校验、备份并重启更新；Git 开发目录只提示版本，不会覆盖当前分支或工作树。
 - **提交新的监控任务**：按固定格式填写，交给后台 Claude 办理（写监控脚本 → 登记到总台 → 启动 → 出问题自动处理 → 全部完成后交付最终结果）。
 
 ![总览](docs/images/overview.png)
@@ -43,6 +44,12 @@ pythonw hub\monitor_hub.py
 - 写完状态文件后可运行 `python hub/validate_status.py <path-to-hub_status.json>` 做结构检查；格式错误会返回非零退出码。
 - 新监控脚本 / 定时任务的机器可读命名规范见 [docs/MONITOR_NAMING.md](docs/MONITOR_NAMING.md)。
 - 界面把运行状态与帮助文案分开：状态常驻，说明性文字使用按钮 hover tooltip；规则见 [docs/UI_GUIDELINES.md](docs/UI_GUIDELINES.md)。
+
+### 自动更新
+
+版本号只由仓库根目录的 `VERSION` 管理。程序启动后最多每 6 小时后台检查一次 GitHub stable Release，也可以点左下角「检查更新」立即检查。更新包必须同时通过 ZIP SHA-256、包内 manifest 和逐文件 SHA-256 校验。
+
+为避免和开发工作流冲突：如果程序从含 `.git` 的目录运行，只会提示新版本并允许打开 Release 页面，**不会**自动 checkout、pull 或覆盖文件。只有由 Release ZIP 解压、带 `.monitor-hub-release.json` 标记的安装目录才允许一键原地更新。完整发布/版本规则见 [docs/UPDATES.md](docs/UPDATES.md)。
 
 不想碰真实项目、只想先看效果：
 ```

@@ -229,3 +229,13 @@
 - **「很久没更新」但计算在跑**：监控本身停了。点「立即检查一次」；还不行就在「提问」里问原因。
 - **「需要你处理」处理完了，怎么消掉？** QoI 监控：在 `D:\Research\QoI-ext-cache\monitor\state.json` 删掉 `notify` 里的那条和 `handled` 里对应的键。定时任务型监控：下一轮检查不再报这个问题时自动消失。
 - **想新增一个已有的监控**：点「编辑项目表」按 9.3 加一项，保存后点「立即刷新」。
+
+
+## 11. 自动更新
+
+- 总台启动后会后台检查 GitHub 的最新正式 Release，成功结果缓存 6 小时；也可以点左下角「检查更新」强制检查。
+- Release 安装版检测到新版本后，可在总台内下载。更新包会先校验 ZIP SHA-256、包内 manifest 和逐文件 SHA-256；校验通过后才允许「重启并安装」。
+- 安装前会备份旧文件到 `HUB_DATA\\updates\\backups`，更新失败时 helper 会尽量自动回滚。
+- 本机的 `monitor_hub_projects.json`、监控状态、HUB_DATA 和项目计算目录不属于更新包，不会被覆盖。
+- 如果总台运行在包含 `.git` 的开发仓库里，自动安装会被强制禁用，只提示版本并允许打开 GitHub Release 页面。这样不会与正在进行的 PR、main 合并或其他开发代理冲突。
+- 发布端以根目录 `VERSION` 为唯一版本源，Release tag 必须是 `v<VERSION>`，并且 tag commit 已经在 `main` 中。详见 `docs/UPDATES.md`。

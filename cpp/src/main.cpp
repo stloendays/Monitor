@@ -5,6 +5,10 @@
 #include <iostream>
 #include <string>
 
+#ifndef MONITOR_HUB_VERSION
+#define MONITOR_HUB_VERSION "0.0.0"
+#endif
+
 int main(int argc, char** argv) {
     try {
         auto paths = monitor_hub::runtime_paths_from_env(argc > 0 ? std::filesystem::path(argv[0]) : std::filesystem::path{});
@@ -23,9 +27,12 @@ int main(int argc, char** argv) {
             else if (arg == "--system-info" && i + 1 < argc) {
                 system = monitor_hub::load_system_info_fixture(argv[++i]);
                 have_fixture = true;
+            } else if (arg == "--version") {
+                std::cout << MONITOR_HUB_VERSION << "\n";
+                return 0;
             } else if (arg == "--help" || arg == "-h") {
                 std::cout
-                    << "monitor_hub_cli [--dump | --probe-system] [--registry FILE] [--hub-data DIR]\n"
+                    << "monitor_hub_cli [--dump | --probe-system | --version] [--registry FILE] [--hub-data DIR]\n"
                     << "                [--job-root DIR] [--no-discovery] [--system-info FILE]\n"
                     << "\n"
                     << "--probe-system  Read Task Scheduler + selected process information through COM/WMI.\n"

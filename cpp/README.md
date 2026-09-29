@@ -103,3 +103,8 @@ Implemented:
 - surface friendly quota/login/service failure summaries.
 
 The adapter remains read-only. Existing Markdown monitor outputs do not need to change.
+
+
+## Version and releases
+
+The C++ build no longer owns a separate hard-coded version. CMake reads `../VERSION`, and `monitor_hub_cli --version` exposes the same value used by the Python GUI and GitHub Release workflow. See `docs/UPDATES.md`.
