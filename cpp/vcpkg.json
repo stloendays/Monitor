@@ -1,0 +1,7 @@
+{
+  "name": "monitor-hub-cpp",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "boost-json"
+  ]
+}
