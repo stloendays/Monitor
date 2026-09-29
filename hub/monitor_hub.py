@@ -507,16 +507,30 @@ def adapt_qoi(p, sysinfo, runner):
         ts = mtime(p["status_json"])
     rows = st.get("rows", [])
     live = {}
-    try:
-        mdir = os.path.dirname(p.get("monitor_script") or "")
-        if mdir and mdir not in sys.path:
-            sys.path.append(mdir)
-        import qoi_ext_monitor as qm  # project adapter: live checkpoint counts between monitor rounds
-        for name, job in qm.JOBS.items():
-            ck, failed, _ = qm.scan(job)
-            live[name] = (len(ck), len(failed), max((os.path.getmtime(x) for x in ck.values()), default=0))
-    except Exception:  # noqa: BLE001
-        pass
+    for name, item in (st.get("live") or {}).items() if isinstance(st.get("live"), dict) else []:
+        if not isinstance(item, dict):
+            continue
+        newest = item.get("newest_checkpoint_epoch")
+        if newest is None and isinstance(item.get("newest_checkpoint"), str):
+            try:
+                newest = dt.datetime.fromisoformat(item["newest_checkpoint"]).timestamp()
+            except ValueError:
+                newest = None
+        live[name] = (int(item.get("checkpoints") or 0), int(item.get("failures") or 0), newest or 0)
+    missing_live = {r.get("job") for r in rows if isinstance(r, dict) and r.get("job")} - set(live)
+    if missing_live:
+        try:
+            mdir = os.path.dirname(p.get("monitor_script") or "")
+            if mdir and mdir not in sys.path:
+                sys.path.append(mdir)
+            import qoi_ext_monitor as qm  # legacy fallback only; new QoI monitors should write status["live"]
+            for name, job in qm.JOBS.items():
+                if name not in missing_live:
+                    continue
+                ck, failed, _ = qm.scan(job)
+                live[name] = (len(ck), len(failed), max((os.path.getmtime(x) for x in ck.values()), default=0))
+        except Exception:  # noqa: BLE001
+            pass
     cn = [("COMPLETE", "已完成并推送"), ("RESULTS_WRITTEN_NOT_PUSHED", "结果已写，待推送"), ("TAKEOVER_ACTIVE", "后台处理中"),
           ("CHECKPOINTS_DONE_NO_RESULTS", "计算完成，待汇总"), ("RETRY_FAILED_ITEMS", "重试失败项"), ("DEAD", "进程停止"), ("RUNNING", "运行中")]
     out_rows, tags = [], []
@@ -533,8 +547,19 @@ def adapt_qoi(p, sysinfo, runner):
     done_n = sum(1 for r in rows if r.get("status") == "COMPLETE")
     runs = ["%s %s" % (o[0], o[2].split("（")[1].rstrip("）")) + ("，约 %s" % o[5] if o[5] != "—" else "")
             for o, r in zip(out_rows, rows) if r.get("status", "").startswith("RUNNING")]
+    row_meta = []
+    for r in rows:
+        meta = dict(task_id=str(r.get("job", "")))
+        if isinstance(r.get("params"), dict):
+            meta["params"] = r["params"]
+        if r.get("workdir"):
+            meta["open_path"] = str(r["workdir"])
+        for key in ("log", "result"):
+            if r.get(key):
+                meta[key] = str(r[key])
+        row_meta.append(meta)
     snap = dict(updated=ts, notes=[], extras=[], table=dict(cols=["作业", "状态", "进度（实时）", "失败", "速率（个/小时）", "预计剩余",
-                                                                "最近检查点", "已推送"], rows=out_rows, tags=tags))
+                                                                "最近检查点", "已推送"], rows=out_rows, tags=tags, row_meta=row_meta))
     snap["summary"] = "%d/%d 个作业已完成" % (done_n, len(rows)) + ("；" + "；".join(runs) + " 进行中" if runs else "")
     snap["headline"] = ("所有作业都已完成并推送。" if rows and done_n == len(rows) else
                         "计算在跑，监控%s检查一次，出问题会自动重启或请后台 Claude 处理。" % every(runner.get("interval") or 15))
