@@ -2,6 +2,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCloseEvent>
 #include <QEvent>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -17,7 +18,6 @@ QtDesktopController::QtDesktopController(QMainWindow& window, QObject* parent)
 QtDesktopController::~QtDesktopController() {
     if (instance_server_ && instance_server_->isListening()) {
         instance_server_->close();
-        QLocalServer::removeServer(single_instance_server_name());
     }
 }
 
@@ -145,7 +145,7 @@ bool QtDesktopController::eventFilter(QObject* watched, QEvent* event) {
         event->type() == QEvent::Close &&
         tray_available() &&
         !force_quit_) {
-        event->ignore();
+        static_cast<QCloseEvent*>(event)->ignore();
         window_->hide();
         show_background_notice_once();
         return true;
