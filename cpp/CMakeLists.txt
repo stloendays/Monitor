@@ -9,6 +9,7 @@ find_package(Boost 1.82 REQUIRED)
 
 add_library(monitor_hub_core
     src/core.cpp
+    src/windows_probe.cpp
     src/boost_json.cpp
 )
 target_include_directories(monitor_hub_core
@@ -16,6 +17,9 @@ target_include_directories(monitor_hub_core
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${Boost_INCLUDE_DIRS}
 )
+if(WIN32)
+    target_link_libraries(monitor_hub_core PRIVATE taskschd wbemuuid ole32 oleaut32)
+endif()
 if(MSVC)
     target_compile_options(monitor_hub_core PRIVATE /W4 /permissive- /utf-8)
 else()

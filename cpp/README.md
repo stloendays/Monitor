@@ -48,3 +48,24 @@ $env:MONITOR_HUB_NO_DISCOVERY="1"
 ```
 
 Phase 1 intentionally migrates the deterministic core first. The production Python GUI remains the fallback until the Windows probe and Qt UI have parity tests.
+
+
+## Phase 2: live Windows read-only probe
+
+The Phase 2 branch adds a native Windows probe while keeping the migration read-only:
+
+- Task Scheduler 2.0 COM reads monitor task names, state, last/next run time, result code, repetition interval and executable action.
+- WMI reads `ProcessId`, `Name` and `CommandLine` for PowerShell, Python and Claude processes used by detached monitors.
+- `monitor_hub_cli --probe-system` prints the raw probe as JSON.
+- `monitor_hub_cli --dump` uses the live probe unless `--system-info FILE` is supplied.
+- no Task Scheduler registration, enable/disable, interval change, process termination or job restart exists in this phase.
+
+Examples:
+
+```powershell
+.\build\Release\monitor_hub_cli.exe --probe-system
+.\build\Release\monitor_hub_cli.exe --dump
+.\build\Release\monitor_hub_cli.exe --dump --system-info tests\fixture_system.json
+```
+
+CI runs `--probe-system` on a Windows runner after the MSVC build and CTest. A non-empty probe error fails the job.

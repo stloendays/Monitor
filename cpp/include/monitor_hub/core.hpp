@@ -70,6 +70,8 @@ std::string classify_row(const std::string& status, const std::string& progress 
 std::string count_summary(const std::vector<std::string>& tags);
 
 SystemInfo load_system_info_fixture(const fs::path& path);
+SystemInfo probe_system_info();
+json::object system_info_json(const SystemInfo& system);
 RunnerInfo runner_info(const json::object& project, const SystemInfo& system, const RuntimePaths& paths);
 json::array takeovers(const json::object& project, const SystemInfo& system, const RuntimePaths& paths);
 json::object snapshot(const json::object& project, const SystemInfo& system, const RuntimePaths& paths);

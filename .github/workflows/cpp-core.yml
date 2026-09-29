@@ -43,3 +43,10 @@ jobs:
         run: cmake --build cpp/build --config Release
       - name: Test
         run: ctest --test-dir cpp/build -C Release --output-on-failure
+      - name: Live Windows probe smoke test
+        shell: pwsh
+        run: |
+          cpp/build/Release/monitor_hub_cli.exe --probe-system | Tee-Object -FilePath cpp/build/probe-system.json
+          $probe = Get-Content cpp/build/probe-system.json -Raw | ConvertFrom-Json
+          if ($probe.error) { throw "Live probe reported an error: $($probe.error)" }
+          if ($null -eq $probe.tasks -or $null -eq $probe.procs) { throw "Live probe output is missing tasks/procs" }
