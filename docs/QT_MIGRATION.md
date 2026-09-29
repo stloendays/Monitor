@@ -17,8 +17,9 @@ The optional `monitor_hub_qt` target currently provides a read-only operational 
 - takeover-history table;
 - final-results table;
 - selection persistence by `task_id` within a project;
-- repository-owned application icon;
-- single-instance desktop behavior;
+- repository-owned PNG/SVG application icon resources;
+- native Windows executable `.ico` resource;
+- per-user single-instance desktop behavior;
 - second-launch activation of the existing window;
 - system-tray background presence;
 - close-to-tray behavior with explicit **Quit**;
@@ -80,7 +81,7 @@ The following still stay in Python or in later desktop/release phases:
 - Markdown and QoI-specific adapters;
 - rich transcript rendering / follow mode;
 - launch-at-login and persistent desktop settings;
-- native Windows executable/installer `.ico` packaging;
+- installer/shortcut icon packaging;
 - notification routing from normalized project/issue events;
 - updater restart integration and packaged release installation;
 - crash-session recovery journals.

@@ -44,6 +44,15 @@ if(MONITOR_HUB_BUILD_QT)
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/monitor_hub.png"
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/monitor_hub.svg"
     )
+    if(WIN32)
+        set(MONITOR_HUB_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/monitor_hub.ico")
+        configure_file(
+            resources/monitor_hub.rc.in
+            "${CMAKE_CURRENT_BINARY_DIR}/monitor_hub.rc"
+            @ONLY
+        )
+        target_sources(monitor_hub_qt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/monitor_hub.rc")
+    endif()
     target_link_libraries(monitor_hub_qt
         PRIVATE
             monitor_hub_core

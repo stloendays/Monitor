@@ -7,12 +7,14 @@ This document defines the desktop-process behavior for the Qt Monitor Hub shell.
 The first desktop-lifecycle layer is intentionally separate from monitoring/business logic. It adds:
 
 - one interactive Qt instance per user session;
+- per-user single-instance endpoint isolation;
 - second-launch activation of the existing window instead of duplicate monitors;
 - system-tray presence while the app is monitoring in the background;
 - close-to-tray behavior when the tray is available;
 - an explicit **Quit** action that really terminates Monitor Hub;
 - an optional `--background` launch mode;
-- a repository-owned application icon used by the Qt window and tray.
+- repository-owned PNG/SVG icon resources for the Qt window and tray;
+- a native Windows `.ico` resource embedded into the Qt executable.
 
 The controller lives in `qt_desktop_controller.*`; the monitoring window does not own process-lifecycle policy.
 
@@ -22,7 +24,7 @@ Normal launch:
 
 ```text
 launch
-→ acquire single-instance endpoint
+→ acquire per-user single-instance endpoint
 → create tray controller
 → show main window
 ```
@@ -68,7 +70,7 @@ This phase does **not** yet add:
 
 - launch-at-login registration;
 - persistent desktop settings;
-- native Windows executable/installer `.ico` packaging;
+- installer/shortcut icon packaging;
 - notification routing from normalized project/issue events;
 - updater restart integration;
 - crash-session recovery journals.
@@ -86,7 +88,8 @@ At minimum:
 5. Tray **Open** restores the same window.
 6. Tray **Quit** exits.
 7. A second launch activates the first instance and exits.
-8. `--background` starts hidden only when the tray is usable.
-9. The window/taskbar/tray use the repository-owned application icon.
+8. Different logged-in users do not suppress each other's Monitor Hub instance.
+9. `--background` starts hidden only when the tray is usable.
+10. The Qt window/tray and native Windows executable use repository-owned Monitor Hub icon assets.
 
 The packaged-build release path should later repeat these checks outside the developer build tree.
