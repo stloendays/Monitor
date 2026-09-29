@@ -73,6 +73,24 @@ int main() {
     assert(std::string(invalid.at("problem").as_string()).find("状态文件格式错误") != std::string::npos);
     assert(!invalid.at("extras").as_array().empty());
 
+    // Detached runners are resolved from pid/exitcode files plus the WMI-style process list.
+    const auto job = paths.job_root / "demo__monitor__local__15m";
+    write_file(job / "pid", "4242\n");
+    json::object dp;
+    dp["id"] = "detached";
+    json::object dr;
+    dr["kind"] = "detach";
+    dr["name"] = "demo__monitor__local__15m";
+    dr["interval_min"] = 15;
+    dp["runner"] = dr;
+    SystemInfo detached_sys;
+    detached_sys.procs.push_back(ProcessInfo{4242, "python.exe", "python monitor.py --job-root \"" + job.string() + "\""});
+    const auto live = runner_info(dp, detached_sys, paths);
+    assert(live.exists && live.running && !live.paused && !live.error);
+    write_file(job / "exitcode", "0\n");
+    const auto stopped = runner_info(dp, detached_sys, paths);
+    assert(stopped.exists && !stopped.running && stopped.paused && !stopped.error);
+
     fs::remove_all(root);
     std::cout << "core tests passed\n";
     return 0;
