@@ -474,7 +474,10 @@ RunnerInfo runner_info(const object& p, const SystemInfo& system, const RuntimeP
         x.paused=st&&(*st=="exit:stopped"||*st=="exit:0");
         if(!st)x.error="找不到后台作业 "+x.name;
         else if(*st!="running"&&*st!="exit:stopped"&&*st!="exit:0")x.error="监控进程意外退出（"+*st+"）";
-        const auto state_text=!st?"不存在":*st=="running"?"运行中":"没在运行（"+*st+"）";
+        std::string state_text;
+        if(!st)state_text="不存在";
+        else if(*st=="running")state_text="运行中";
+        else state_text="没在运行（"+*st+"）";
         x.text="后台作业 "+x.name+"，"+every(x.interval_min)+" · "+state_text;
         return x;
     }
