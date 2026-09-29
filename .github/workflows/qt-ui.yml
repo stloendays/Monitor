@@ -84,10 +84,9 @@ jobs:
       - name: Installed package smoke test
         shell: pwsh
         run: |
-          $diagnostics = & ".\dist\stage\bin\monitor_hub_qt.exe" --desktop-diagnostics
-          $versionLine = $diagnostics | Where-Object { $_ -match '^version=' } | Select-Object -First 1
-          if (-not $versionLine) { throw "staged app did not report version" }
-          $version = ($versionLine -replace '^version=', '').Trim()
+          & ".\dist\stage\bin\monitor_hub_qt.exe" --desktop-diagnostics
+          if ($LASTEXITCODE -ne 0) { throw "staged diagnostics failed" }
+          $version = (Get-Content ".\dist\stage\VERSION" -Raw).Trim()
           $installer = ".\dist\Monitor-Hub-$version-win64-setup.exe"
           if (-not (Test-Path -LiteralPath $installer)) { throw "installer missing: $installer" }
           $installDir = Join-Path $env:RUNNER_TEMP "MonitorHubInstalled"
