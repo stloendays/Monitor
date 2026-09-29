@@ -31,6 +31,7 @@ from tkinter import messagebox, simpledialog, ttk
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import claude_stream as cs  # noqa: E402
+import naming as nm  # noqa: E402
 
 # MONITOR_HUB_REGISTRY / MONITOR_HUB_DATA point the hub at other data (demo mode: tests/demo/make_demo.py);
 # MONITOR_HUB_NO_DISCOVERY=1 hides the machine's unregistered monitors.
@@ -560,9 +561,11 @@ def adapt_generic(p, sysinfo, runner):
     cols, rows = list(tb.get("cols") or []), [[str(c) for c in r] for r in (tb.get("rows") or [])]
     tags = list(tb.get("tags") or [])
     tags = (tags + [""] * len(rows))[:len(rows)]
+    row_meta = [m if isinstance(m, dict) else {} for m in (tb.get("row_meta") or [])]
+    row_meta = (row_meta + [{} for _ in rows])[:len(rows)]
     nxt = st.get("next")
     snap = dict(updated=ts, headline=st.get("headline", ""), summary=st.get("summary") or count_summary(tags), notes=list(st.get("notes") or []),
-                extras=[], table=dict(cols=cols, rows=rows, tags=tags), attention=list(st.get("attention") or []),
+                extras=[], table=dict(cols=cols, rows=rows, tags=tags, row_meta=row_meta), attention=list(st.get("attention") or []),
                 working=st.get("working") or None, done=bool(st.get("done")), results=list(st.get("results") or []),
                 next=short_time(runner["next"]) if runner.get("next") else (short_time(nxt) if nxt and "T" in str(nxt) else nxt),
                 error=st.get("error") or None)
@@ -680,8 +683,12 @@ def load_projects(sysinfo):
         return projects + [SETUP_PROJECT]
     for name, t in sorted(sysinfo["tasks"].items()):
         if name not in known_tasks:
-            extra.append(dict(id="task:" + name, name=name, area="其他监控 · 定时任务", adapter="runner_only",
-                              runner=dict(kind="schtask", name=name), action=t.get("action", ""), unregistered=True))
+            meta = nm.parse_monitor_identity(name, t.get("action", ""))
+            display = meta.get("display_name") or name
+            area = "其他监控 · 定时任务" + ((" · " + meta["scope"]) if meta.get("scope") else "")
+            extra.append(dict(id="task:" + name, name=display, area=area, adapter="runner_only",
+                              runner=dict(kind="schtask", name=name, interval_min=meta.get("interval_min")), action=t.get("action", ""),
+                              naming=meta, unregistered=True))
     for d in glob.glob(os.path.join(JOBROOT, "*monitor*")):
         name = os.path.basename(d)
         if name not in known_jobs:
@@ -987,13 +994,15 @@ class Hub(tk.Tk):
         hs = ttk.Scrollbar(box, orient="horizontal", command=self.pg_tree.xview)
         self.pg_tree.configure(yscrollcommand=vs.set, xscrollcommand=hs.set)
         self.pg_tree.grid(row=0, column=0, sticky="nsew")
+        self.pg_tree.bind("<Double-1>", lambda e: self._open_progress_task())
+        self.pg_tree.bind("<Return>", lambda e: self._open_progress_task())
         vs.grid(row=0, column=1, sticky="ns")
         hs.grid(row=1, column=0, sticky="ew")
         box.rowconfigure(0, weight=1)
         box.columnconfigure(0, weight=1)
         for tag, col in (("done", GREEN), ("bad", RED), ("run", BLUE), ("queue", BROWN), ("other", INK)):
             self.pg_tree.tag_configure(tag, foreground=col)
-        tk.Label(t1, text="颜色：绿色 = 已完成，蓝色 = 运行中，棕色 = 排队中，红色 = 异常，黑色 = 其他", font=(UI, 10), fg=INK, bg="white",
+        tk.Label(t1, text="颜色：绿色 = 已完成，蓝色 = 运行中，棕色 = 排队中，红色 = 异常，黑色 = 其他。双击任务行可打开该任务的目录、日志或结果文件。", font=(UI, 10), fg=INK, bg="white",
                  anchor="w").pack(fill="x", pady=(4, 0))
         nf, self.pg_notes = self._textbox(t1, height=5)
         nf.pack(fill="x", pady=(6, 0))
@@ -1318,8 +1327,11 @@ class Hub(tk.Tk):
                 self.pg_tree.heading(i, text=c)
                 self.pg_tree.column(i, width=min(420, max(80, 14 * longest)), anchor="w", stretch=True)
         self.pg_tree.delete(*self.pg_tree.get_children())
-        for row, tag in zip(tb["rows"], tb["tags"]):
-            self.pg_tree.insert("", "end", values=row, tags=(tag,) if tag else ())
+        self._pg_meta = list(tb.get("row_meta") or [])
+        if len(self._pg_meta) < len(tb["rows"]):
+            self._pg_meta += [{} for _ in range(len(tb["rows"]) - len(self._pg_meta))]
+        for i, (row, tag) in enumerate(zip(tb["rows"], tb["tags"])):
+            self.pg_tree.insert("", "end", iid=str(i), values=row, tags=(tag,) if tag else ())
         self.pg_tree.configure(height=max(3, min(18, len(tb["rows"]))))
         notes = [(e, None) for e in s.get("extras", []) if e]
         if s.get("notes"):
@@ -1379,6 +1391,33 @@ class Hub(tk.Tk):
         self.nb.tab(self.t5, state="normal" if lq else "hidden")
         if lq:
             self.lq_btn.configure(text=lq.get("label", "查询"))
+
+    def _open_progress_task(self):
+        sel = self.pg_tree.selection()
+        iid = sel[0] if sel else self.pg_tree.focus()
+        if not iid:
+            return
+        try:
+            meta = self._pg_meta[int(iid)] if getattr(self, "_pg_meta", None) else {}
+        except (ValueError, IndexError):
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        target = next((meta.get(k) for k in ("open_path", "path", "workdir", "log", "result") if meta.get(k)), None)
+        if target and os.path.exists(target):
+            os.startfile(target)
+            return
+        detail = []
+        for key, label in (("task_id", "任务"), ("job_id", "作业号"), ("host", "主机"), ("script", "脚本"),
+                           ("command", "命令"), ("log", "日志"), ("result", "结果")):
+            if meta.get(key):
+                detail.append("%s：%s" % (label, meta[key]))
+        params = meta.get("params")
+        if isinstance(params, dict) and params:
+            detail.append("参数：" + "；".join("%s=%s" % (k, v) for k, v in params.items()))
+        messagebox.showinfo("任务详情", "\n".join(detail) if detail else
+                            "这个任务还没有提供可打开路径。请让监控在 hub_status.json 的 table.row_meta 中写入 open_path、log 或 result。",
+                            parent=self)
 
     def _open_key(self, key):
         p, _ = self._project()
