@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iomanip>
 #include <regex>
+#include <set>
 #include <sstream>
 
 namespace monitor_hub {
@@ -62,6 +63,94 @@ std::string lower(std::string s) {
     return s;
 }
 
+struct ContractIssues {
+    std::vector<std::string> errors;
+    std::vector<std::string> warnings;
+};
+
+std::string join(const std::vector<std::string>& xs, const std::string& sep, std::size_t limit = static_cast<std::size_t>(-1)) {
+    std::string out;
+    for (std::size_t i = 0; i < xs.size() && i < limit; ++i) {
+        if (!out.empty()) out += sep;
+        out += xs[i];
+    }
+    return out;
+}
+
+ContractIssues validate_status_contract(const object& st) {
+    ContractIssues out;
+    const auto* updated = st.if_contains("updated");
+    if (!updated || !updated->is_string() || str(updated).empty() || !parse_iso_local_seconds(str(updated)))
+        out.errors.push_back("updated 必须是有效 ISO 8601 字符串");
+    const auto* headline = st.if_contains("headline");
+    if (!headline || !headline->is_string() || str(headline).empty())
+        out.errors.push_back("headline 必须是非空字符串");
+    if (const auto* done = st.if_contains("done"); done && !done->is_bool())
+        out.errors.push_back("done 必须是 boolean");
+
+    const auto* table = obj(st.if_contains("table"));
+    if (!table) {
+        out.errors.push_back("table 必须是 object");
+        return out;
+    }
+    const auto* cols = arr(table->if_contains("cols"));
+    const auto* rows = arr(table->if_contains("rows"));
+    if (!cols) out.errors.push_back("table.cols 必须是字符串数组");
+    else for (const auto& x : *cols) if (!x.is_string()) { out.errors.push_back("table.cols 必须是字符串数组"); break; }
+    if (!rows) out.errors.push_back("table.rows 必须是二维数组");
+    if (rows) {
+        for (std::size_t i = 0; i < rows->size(); ++i) {
+            const auto* row = arr(&(*rows)[i]);
+            if (!row) {
+                out.errors.push_back("table.rows[" + std::to_string(i) + "] 必须是数组");
+                continue;
+            }
+            if (cols && row->size() != cols->size())
+                out.errors.push_back("table.rows[" + std::to_string(i) + "] 列数与 cols 不一致");
+            for (std::size_t j = 0; j < row->size(); ++j) {
+                const auto& cell = (*row)[j];
+                if (!(cell.is_string() || cell.is_int64() || cell.is_uint64() || cell.is_double()))
+                    out.errors.push_back("table.rows[" + std::to_string(i) + "][" + std::to_string(j) + "] 只能是字符串或数字");
+            }
+        }
+    }
+
+    if (const auto* tags_v = table->if_contains("tags")) {
+        if (!tags_v->is_array()) out.errors.push_back("table.tags 必须是数组");
+        else {
+            const auto& tags = tags_v->as_array();
+            if (rows && tags.size() != rows->size()) out.warnings.push_back("table.tags 数量与 rows 不一致；总台会自动补齐/截断");
+            static const std::set<std::string> allowed{"done","run","queue","bad","other",""};
+            for (std::size_t i = 0; i < tags.size(); ++i) {
+                if (!tags[i].is_string() || !allowed.count(str(&tags[i])))
+                    out.errors.push_back("table.tags[" + std::to_string(i) + "] 不在允许集合中");
+            }
+        }
+    }
+
+    if (const auto* meta_v = table->if_contains("row_meta")) {
+        if (!meta_v->is_array()) out.errors.push_back("table.row_meta 必须是数组");
+        else {
+            const auto& metas = meta_v->as_array();
+            if (rows && metas.size() != rows->size()) out.warnings.push_back("table.row_meta 数量与 rows 不一致；总台会自动补齐/截断");
+            std::set<std::string> ids;
+            for (std::size_t i = 0; i < metas.size(); ++i) {
+                const auto* m = obj(&metas[i]);
+                if (!m) { out.errors.push_back("table.row_meta[" + std::to_string(i) + "] 必须是 object"); continue; }
+                if (const auto* tid = m->if_contains("task_id")) {
+                    if (!tid->is_string() || str(tid).empty()) out.errors.push_back("task_id 必须是非空字符串");
+                    else if (!ids.insert(str(tid)).second) out.warnings.push_back("task_id " + str(tid) + " 重复");
+                } else if (!m->empty()) {
+                    out.warnings.push_back("非空 row_meta 建议提供稳定 task_id");
+                }
+                if (const auto* params = m->if_contains("params"); params && !params->is_object())
+                    out.errors.push_back("row_meta.params 必须是 object");
+            }
+        }
+    }
+    return out;
+}
+
 object runner_json(const RunnerInfo& r) {
     object o;
     o["kind"] = r.kind; o["name"] = r.name;
@@ -93,6 +182,7 @@ object generic_adapter(const object& p, const RunnerInfo& runner) {
     const fs::path path = str(p.if_contains("status_json"));
     object st;
     if (auto v = read_json(path); v && v->is_object()) st = v->as_object();
+    const auto issues = validate_status_contract(st);
     auto updated = parse_iso_local_seconds(str(st.if_contains("updated")));
     if (!updated) updated = mtime_seconds(path);
 
@@ -122,7 +212,9 @@ object generic_adapter(const object& p, const RunnerInfo& runner) {
     const auto summary = str(st.if_contains("summary"));
     snap["summary"] = summary.empty() ? count_summary(tags) : summary;
     snap["notes"] = json_strings(strings(st.if_contains("notes")));
-    snap["extras"] = array{};
+    array extras;
+    for (const auto& w : issues.warnings) extras.emplace_back("状态协议提示：" + w);
+    snap["extras"] = std::move(extras);
     snap["table"] = std::move(table);
     snap["attention"] = json_strings(strings(st.if_contains("attention")));
     const auto working = str(st.if_contains("working"));
@@ -133,7 +225,13 @@ object generic_adapter(const object& p, const RunnerInfo& runner) {
     if (runner.next) snap["next"] = short_time(*runner.next);
     else if (!next.empty() && next.find('T') != std::string::npos) snap["next"] = short_time(next);
     else snap["next"] = next.empty() ? value(nullptr) : value(next);
-    const auto error = str(st.if_contains("error"));
+    const auto monitor_error = str(st.if_contains("error"));
+    const auto schema_error = issues.errors.empty() ? std::string{} : "状态文件格式错误：" + join(issues.errors, "；", 4);
+    std::string error = monitor_error;
+    if (!schema_error.empty()) {
+        if (!error.empty()) error += "；";
+        error += schema_error;
+    }
     snap["error"] = error.empty() ? value(nullptr) : value(error);
     snap["takeovers"] = array{};
     return snap;
