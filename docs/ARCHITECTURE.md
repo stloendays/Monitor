@@ -63,7 +63,10 @@ Project = {
 格式见 `hub/hub_status.schema.json` 和用户说明第 9.4 节。关键字段：`updated`（ISO 时间）、`headline`、`summary`、`done`、`table{cols,rows,tags}`、`attention[]`（只放需要用户决定的事）、`working`、`notes[]`、`next`、`results[]`、`error`（监控自身的故障）。
 
 ### 2.3 QoI 兼容状态文件
-旧 QoI `status.json` 仍由 `adapter: "qoi"` 读取；新格式可写顶层 `live.{job}` 提供实时 checkpoints / failures / newest_checkpoint，从而避免总台动态导入项目模块。任务行还可写 `workdir / log / result / params`，总台会转成统一 `row_meta`。完整规则与示例见 `docs/QOI_ADAPTER.md`、`hub/qoi_status.example.json`。新监控仍优先使用 generic `hub_status.json`。\n\n### 2.4 Markdown 状态文件（旧的 HPC 监控）\n第一行 `# 标题`，第一段是一句话结论，然后是一张 Markdown 表格（必须有「状态」列，最好有「进度」列），`**备注：**` 下面是 `- ` 开头的列表，另有 `下次检查：…` 行。连不上服务器时正文里包含 `ssh/remote monitor FAILED`。
+旧 QoI `status.json` 仍由 `adapter: "qoi"` 读取；新格式可写顶层 `live.{job}` 提供实时 checkpoints / failures / newest_checkpoint，从而避免总台动态导入项目模块。任务行还可写 `workdir / log / result / params`，总台会转成统一 `row_meta`。完整规则与示例见 `docs/QOI_ADAPTER.md`、`hub/qoi_status.example.json`。新监控仍优先使用 generic `hub_status.json`。
+
+### 2.4 Markdown 状态文件（旧的 HPC 监控）
+第一行 `# 标题`，第一段是一句话结论，然后是一张 Markdown 表格（必须有「状态」列，最好有「进度」列），`**备注：**` 下面是 `- ` 开头的列表，另有 `下次检查：…` 行。连不上服务器时正文里包含 `ssh/remote monitor FAILED`。
 
 ### 2.5 接管记录（stream-json，一行一个 JSON）
 ```
