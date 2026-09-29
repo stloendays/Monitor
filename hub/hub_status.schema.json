@@ -9,6 +9,12 @@
     "table"
   ],
   "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Optional protocol version. New monitors should write 1; omitted by legacy generic monitors."
+    },
     "updated": {
       "type": "string",
       "description": "ISO 8601 local time of this monitoring round, e.g. 2026-09-28T21:45:00"
