@@ -3,11 +3,13 @@
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QCryptographicHash>
 #include <QEvent>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QMainWindow>
 #include <QMenu>
+#include <QStandardPaths>
 #include <QSystemTrayIcon>
 
 namespace monitor_hub {
@@ -22,7 +24,16 @@ QtDesktopController::~QtDesktopController() {
 }
 
 QString QtDesktopController::single_instance_server_name() const {
-    return QStringLiteral("monitor-hub.qt.single-instance.v1");
+    // Scope the endpoint to this user's local application-data root so two
+    // simultaneously logged-in users do not suppress each other's UI.
+    const auto scope =
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    const auto digest =
+        QCryptographicHash::hash(scope.toUtf8(), QCryptographicHash::Sha256)
+            .toHex()
+            .left(16);
+    return QStringLiteral("monitor-hub.qt.%1")
+        .arg(QString::fromLatin1(digest));
 }
 
 bool QtDesktopController::notify_existing_instance() const {
