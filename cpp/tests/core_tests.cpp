@@ -1,4 +1,5 @@
-#include "monitor_hub/core.hpp"\n#include "monitor_hub/overview.hpp"
+#include "monitor_hub/core.hpp"
+#include "monitor_hub/overview.hpp"
 
 #include <boost/json.hpp>
 #include <cassert>
