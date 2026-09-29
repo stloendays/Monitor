@@ -80,11 +80,15 @@ if ($LASTEXITCODE -ne 0) {
 
 $qtExe = Join-Path $stage "bin\monitor_hub_qt.exe"
 $cliExe = Join-Path $stage "bin\monitor_hub_cli.exe"
+$updaterExe = Join-Path $stage "bin\monitor_hub_updater.exe"
 if (-not (Test-Path -LiteralPath $qtExe)) {
     throw "Qt executable missing after install: $qtExe"
 }
 if (-not (Test-Path -LiteralPath $cliExe)) {
     throw "CLI executable missing after install: $cliExe"
+}
+if (-not (Test-Path -LiteralPath $updaterExe)) {
+    throw "Updater executable missing after install: $updaterExe"
 }
 
 Write-Host "Deploying Qt runtime..."
