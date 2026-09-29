@@ -360,19 +360,46 @@ std::string count_summary(const std::vector<std::string>& tags) {
 SystemInfo load_system_info_fixture(const fs::path& path) {
     SystemInfo out; auto v=read_json(path); if(!v||!v->is_object())return out; const auto& root=v->as_object();
     if(const auto* tasks=obj(root.if_contains("tasks"))) for(const auto& kv:*tasks){ if(!kv.value().is_object())continue; const auto& o=kv.value().as_object(); TaskInfo t; t.name=std::string(kv.key()); t.state=str(o.if_contains("state")); t.last=str(o.if_contains("last")); t.result=integer(o.if_contains("result")).value_or(0); t.next=str(o.if_contains("next")); t.interval=str(o.if_contains("interval")); t.action=str(o.if_contains("action")); out.tasks[t.name]=std::move(t); }
+    if(const auto* procs=arr(root.if_contains("procs"))) for(const auto& x:*procs){ if(!x.is_object())continue; const auto& o=x.as_object(); ProcessInfo p; p.pid=integer(o.if_contains("pid")).value_or(0); p.name=str(o.if_contains("name")); p.cmd=str(o.if_contains("cmd")); out.procs.push_back(std::move(p)); }
     out.error=str(root.if_contains("error")); return out;
 }
 
-RunnerInfo runner_info(const object& p, const SystemInfo& system, const RuntimePaths&) {
+std::optional<std::string> detach_state(const std::string& name, const SystemInfo& system, const RuntimePaths& paths) {
+    const auto dir = paths.job_root / name;
+    std::error_code ec;
+    if(!fs::is_directory(dir, ec) || ec) return std::nullopt;
+    const auto exit_file = dir / "exitcode";
+    if(fs::exists(exit_file, ec) && !ec) return "exit:" + trim(read_text(exit_file));
+    int pid = 0;
+    try { pid = std::stoi(trim(read_text(dir / "pid"))); } catch(...) { return std::string("gone"); }
+    const auto needle = lower(dir.string());
+    for(const auto& p : system.procs) {
+        if(p.pid == pid && lower(p.cmd).find(needle) != std::string::npos) return std::string("running");
+    }
+    return std::string("gone");
+}
+
+RunnerInfo runner_info(const object& p, const SystemInfo& system, const RuntimePaths& paths) {
     RunnerInfo x; const auto* r=obj(p.if_contains("runner")); if(!r)return x; x.kind=str(r->if_contains("kind")); x.name=str(r->if_contains("name")); x.interval_min=integer(r->if_contains("interval_min"));
     if(x.kind=="none"){x.exists=true;x.text=str(p.if_contains("runner_text"));return x;}
     if(x.kind=="schtask"){
         const auto it=system.tasks.find(x.name); if(it==system.tasks.end()){x.error="找不到定时任务 "+x.name;x.text="Windows 定时任务 "+x.name+"（不存在）";return x;}
         const auto& t=it->second; x.exists=true; if(auto m=iso_minutes(t.interval))x.interval_min=m; x.paused=t.state=="Disabled"; x.running=t.state=="Running"; if(!t.last.empty())x.last=t.last;if(!x.paused&&!t.next.empty())x.next=t.next;
-        std::string rs=t.result==0?"成功":t.result==267009?"正在运行":t.result==267011?"还没运行过":"出错"; if(rs=="出错")x.error="定时任务上次运行出错";
+        std::string rs=t.result==0?"成功":t.result==267009?"正在运行":t.result==267011?"还没运行过":"出错"; if(rs=="出错"){std::ostringstream os;os<<"定时任务上次运行出错（代码 0x"<<std::uppercase<<std::hex<<t.result<<"）";x.error=os.str();}
         x.text="Windows 定时任务 "+x.name+"，"+(every(x.interval_min).empty()?"按计划":every(x.interval_min))+" · 上次运行 "+short_time(t.last)+"（"+rs+"）· "+(x.paused?"已停用":"下次 "+short_time(t.next)); return x;
     }
-    x.error="C++ phase 1 尚未接入 runner.kind="+x.kind; return x;
+    if(x.kind=="detach"){
+        const auto st=detach_state(x.name,system,paths);
+        x.exists=st.has_value();
+        x.running=st&&*st=="running";
+        x.paused=st&&(*st=="exit:stopped"||*st=="exit:0");
+        if(!st)x.error="找不到后台作业 "+x.name;
+        else if(*st!="running"&&*st!="exit:stopped"&&*st!="exit:0")x.error="监控进程意外退出（"+*st+"）";
+        const auto state_text=!st?"不存在":*st=="running"?"运行中":"没在运行（"+*st+"）";
+        x.text="后台作业 "+x.name+"，"+every(x.interval_min)+" · "+state_text;
+        return x;
+    }
+    x.error="C++ 尚未接入 runner.kind="+x.kind; return x;
 }
 
 json::array takeovers(const object&, const SystemInfo&, const RuntimePaths&) { return {}; }
