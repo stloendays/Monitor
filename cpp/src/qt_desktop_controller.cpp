@@ -262,6 +262,15 @@ void QtDesktopController::show_settings_dialog() {
             "仅通知需要处理、监控错误、状态过期、恢复处理中和项目完成等重要变化。"));
     layout->addWidget(notifications);
 
+    auto* check_updates =
+        new QCheckBox(QStringLiteral("自动检查稳定更新"), &dialog);
+    check_updates->setChecked(current.check_updates);
+    check_updates->setToolTip(
+        QStringLiteral(
+            "启动后及约每 6 小时检查一次 GitHub stable Release；"
+            "不会自动覆盖 Git 开发工作区。"));
+    layout->addWidget(check_updates);
+
     auto* launch_at_login =
         new QCheckBox(QStringLiteral("登录 Windows 时自动启动 Monitor Hub"), &dialog);
     launch_at_login->setChecked(current.launch_at_login);
@@ -297,6 +306,7 @@ void QtDesktopController::show_settings_dialog() {
     if (!save_desktop_preferences(
             close_to_tray->isChecked(),
             notifications->isChecked(),
+            check_updates->isChecked(),
             &error)) {
         QMessageBox::warning(
             window_,
@@ -470,6 +480,8 @@ void QtDesktopController::open_pending_release_page() {
 }
 
 void QtDesktopController::check_for_updates(bool interactive) {
+    if (!interactive && !settings_.check_updates) return;
+
     if (!updates_ || update_busy_) {
         if (interactive && update_busy_) {
             QMessageBox::information(
