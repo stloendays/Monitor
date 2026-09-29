@@ -706,8 +706,13 @@ def load_projects(sysinfo):
     for d in glob.glob(os.path.join(JOBROOT, "*monitor*")):
         name = os.path.basename(d)
         if name not in known_jobs:
-            extra.append(dict(id="job:" + name, name=name, area="其他监控 · 后台作业", adapter="runner_only",
-                              runner=dict(kind="detach", name=name), action=read_text(os.path.join(d, "run.ps1"))[-300:], unregistered=True))
+            action = read_text(os.path.join(d, "run.ps1"))[-1200:]
+            meta = nm.parse_monitor_identity(name, action)
+            display = meta.get("display_name") or name
+            area = "其他监控 · 后台作业" + ((" · " + meta["scope"]) if meta.get("scope") else "")
+            extra.append(dict(id="job:" + name, name=display, area=area, adapter="runner_only",
+                              runner=dict(kind="detach", name=name, interval_min=meta.get("interval_min")),
+                              action=action, naming=meta, unregistered=True))
     return projects + [SETUP_PROJECT] + extra
 
 
