@@ -8,18 +8,24 @@ on:
   push:
     branches: [main]
     paths:
+      - 'VERSION'
       - 'cpp/**'
       - 'hub/**'
       - 'tests/**'
       - 'docs/MONITOR_NAMING.md'
+      - 'docs/UPDATES.md'
       - '.github/workflows/cpp-core.yml'
+      - '.github/workflows/release.yml'
   pull_request:
     paths:
+      - 'VERSION'
       - 'cpp/**'
       - 'hub/**'
       - 'tests/**'
       - 'docs/MONITOR_NAMING.md'
+      - 'docs/UPDATES.md'
       - '.github/workflows/cpp-core.yml'
+      - '.github/workflows/release.yml'
 
 jobs:
   windows-msvc:
@@ -32,9 +38,10 @@ jobs:
       - name: Python contract checks
         shell: pwsh
         run: |
-          python -m py_compile hub/monitor_hub.py hub/naming.py hub/status_contract.py hub/validate_status.py tests/demo/make_demo.py tests/naming_test.py tests/status_contract_test.py
+          python -m py_compile hub/monitor_hub.py hub/naming.py hub/status_contract.py hub/validate_status.py hub/updater.py hub/apply_update.py hub/build_release.py tests/demo/make_demo.py tests/naming_test.py tests/status_contract_test.py tests/updater_test.py
           python tests/naming_test.py
           python tests/status_contract_test.py
+          python tests/updater_test.py
           python hub/validate_status.py hub/hub_status.example.json
       - name: Configure
         shell: pwsh
@@ -50,3 +57,14 @@ jobs:
           $probe = Get-Content cpp/build/probe-system.json -Raw | ConvertFrom-Json
           if ($probe.error) { throw "Live probe reported an error: $($probe.error)" }
           if ($null -eq $probe.tasks -or $null -eq $probe.procs) { throw "Live probe output is missing tasks/procs" }
+      - name: Version check
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $reported = (& .\cpp\build\Release\monitor_hub_cli.exe --version).Trim()
+          if ($reported -ne $version) { throw "CLI version '$reported' != VERSION '$version'" }
+      - name: Release package smoke test
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          python hub/build_release.py --repo-root . --exe cpp/build/Release/monitor_hub_cli.exe --out cpp/build/package-smoke --tag "v$version"
