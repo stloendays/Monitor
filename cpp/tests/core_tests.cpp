@@ -210,6 +210,35 @@ int main() {
     assert(tks[0].as_object().at("kind").as_string() == "jsonl");
     assert(tks[0].as_object().at("label").as_string() == "09-29 12:50");
 
+    // QoI compatibility adapter: top-level live data overrides stale row checkpoint counts.
+    const auto qoi_status = root / "qoi_status.json";
+    write_file(qoi_status,
+        R"({"updated":"2026-09-29T10:00:00","rows":[)"
+        R"({"job":"fold1","status":"COMPLETE","checkpoints":1200,"failures":0,"total":1200,"rate_per_h":142.5,"branch_pushed":true,"params":{"fold":1}},)"
+        R"({"job":"fold2","status":"RUNNING","checkpoints":610,"failures":1,"total":1200,"last_checkpoint_min_ago":9,"rate_per_h":138.2,"eta_h":4.3,"branch_pushed":false,"workdir":"C:/qoi/fold2","params":{"fold":2,"seed":43}})"
+        R"(],"live":{"fold2":{"checkpoints":642,"failures":1,"newest_checkpoint":"2026-09-29T09:58:00"}},"notify":[],"attention":[]})");
+    json::object qp;
+    qp["id"] = "qoi-demo";
+    qp["name"] = "qoi-demo";
+    qp["adapter"] = "qoi";
+    qp["status_json"] = qoi_status.string();
+    json::object qr;
+    qr["kind"] = "none";
+    qr["interval_min"] = 15;
+    qp["runner"] = qr;
+    qp["runner_text"] = "fixture";
+    const auto qs = snapshot(qp, SystemInfo{}, paths);
+    const auto& qt = qs.at("table").as_object();
+    assert(qt.at("rows").as_array().size() == 2);
+    assert(qt.at("rows").as_array()[1].as_array()[2].as_string() == "642 / 1200（53.5%）");
+    assert(qt.at("tags").as_array()[0].as_string() == "done");
+    assert(qt.at("tags").as_array()[1].as_string() == "run");
+    assert(qt.at("row_meta").as_array()[1].as_object().at("task_id").as_string() == "fold2");
+    assert(qt.at("row_meta").as_array()[1].as_object().at("open_path").as_string() == "C:/qoi/fold2");
+    assert(qt.at("row_meta").as_array()[1].as_object().at("params").as_object().at("seed").as_int64() == 43);
+    assert(qs.at("summary").as_string() == "1/2 个作业已完成；fold2 53.5%，约 4.3 小时 进行中");
+    assert(!qs.at("done").as_bool());
+
     fs::remove_all(root);
     std::cout << "core tests passed\n";
     return 0;
