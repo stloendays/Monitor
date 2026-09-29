@@ -104,7 +104,7 @@ if (-not $versionMatch) {
     throw "CMake cache did not report CMAKE_PROJECT_VERSION"
 }
 $version = $versionMatch.Matches[0].Groups[1].Value.Trim()
-if ($version -notmatch '^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$') {
+if ($version -notmatch '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$') {
     throw "invalid staged desktop version: $version"
 }
 Set-Content -LiteralPath (Join-Path $stage "VERSION") -Value $version -Encoding ascii
