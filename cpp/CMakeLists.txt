@@ -185,6 +185,19 @@ if(BUILD_TESTING)
         COMMAND monitor_hub_control_orchestrator_tests
     )
 
+    add_executable(
+        monitor_hub_recovery_projection_tests
+        tests/recovery_projection_tests.cpp
+    )
+    target_link_libraries(
+        monitor_hub_recovery_projection_tests
+        PRIVATE monitor_hub_core
+    )
+    add_test(
+        NAME monitor_hub_recovery_projection_tests
+        COMMAND monitor_hub_recovery_projection_tests
+    )
+
     add_test(
         NAME monitor_hub_registered_handlers_cli
         COMMAND monitor_hub_control --registered-handlers

@@ -126,6 +126,7 @@ private:
     QPushButton* copy_command_ = nullptr;
 
     QLabel* event_status_ = nullptr;
+    QTableWidget* recovery_flow_ = nullptr;
     QTableWidget* issues_ = nullptr;
     QTableWidget* event_timeline_ = nullptr;
 

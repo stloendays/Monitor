@@ -122,6 +122,75 @@ QColor agent_state_color(const std::string& state) {
     return QColor(QStringLiteral("#77736C"));
 }
 
+QColor recovery_stage_color(const std::string& stage) {
+    if (stage == "resolved" || stage == "recovery_verified")
+        return QColor(QStringLiteral("#3F7D5A"));
+    if (stage == "needs_user")
+        return QColor(QStringLiteral("#9A641F"));
+    if (stage == "failed")
+        return QColor(QStringLiteral("#A34747"));
+    if (stage == "waiting_verification" ||
+        stage == "recovery_verification" ||
+        stage == "agent_handling" ||
+        stage == "agent_completed" ||
+        stage == "action_selected")
+        return QColor(QStringLiteral("#4E6B8A"));
+    return QColor(QStringLiteral("#77736C"));
+}
+
+QString recovery_flow_text(const IssueProjection& issue) {
+    const auto stage = issue_recovery_stage(issue);
+    if (stage == "needs_user") {
+        return QStringLiteral(
+            "✓ 问题  →  ⚠ 决策  →  ○ 动作  →  ○ 验证  →  ○ 解决");
+    }
+
+    const auto mark = [](bool done, bool active) {
+        if (done) return QStringLiteral("✓");
+        if (active) return QStringLiteral("●");
+        return QStringLiteral("○");
+    };
+
+    const bool handling_done =
+        issue.action_applied ||
+        issue.task_restarted ||
+        issue.recovery_started ||
+        issue.recovery_verified ||
+        issue.resolved;
+    const bool handling_active =
+        stage == "classified" ||
+        stage == "assigned" ||
+        stage == "investigating" ||
+        stage == "agent_handling" ||
+        stage == "agent_completed" ||
+        stage == "action_selected";
+
+    const bool action_done =
+        issue.action_applied ||
+        issue.task_restarted ||
+        issue.recovery_started ||
+        issue.recovery_verified ||
+        issue.resolved;
+    const bool action_active = stage == "action_selected";
+
+    const bool verify_done =
+        issue.recovery_verified || issue.resolved;
+    const bool verify_active =
+        stage == "waiting_verification" ||
+        stage == "recovery_verification";
+
+    const bool resolve_done = issue.resolved;
+    const bool resolve_active = stage == "recovery_verified";
+
+    return QStringLiteral(
+               "%1 问题  →  %2 处理  →  %3 动作  →  %4 验证  →  %5 解决")
+        .arg(mark(true, stage == "detected"))
+        .arg(mark(handling_done, handling_active))
+        .arg(mark(action_done, action_active))
+        .arg(mark(verify_done, verify_active))
+        .arg(mark(resolve_done, resolve_active));
+}
+
 void emphasize_item(QTableWidgetItem* item, const QColor& color) {
     if (!item) return;
     item->setForeground(QBrush(color));
@@ -936,6 +1005,35 @@ void QtMainWindow::build_ui() {
         event_tab));
     event_layout->addLayout(event_head);
 
+    auto* recovery_label =
+        new QLabel(QStringLiteral("自动恢复流程"), event_tab);
+    recovery_label->setObjectName(QStringLiteral("sectionLabel"));
+    recovery_label->setFont(section_font);
+    event_layout->addWidget(recovery_label);
+
+    recovery_flow_ = new QTableWidget(event_tab);
+    configure_table(recovery_flow_);
+    recovery_flow_->setColumnCount(6);
+    recovery_flow_->setHorizontalHeaderLabels({
+        QStringLiteral("任务"),
+        QStringLiteral("Issue"),
+        QStringLiteral("恢复链条"),
+        QStringLiteral("当前阶段"),
+        QStringLiteral("下一步"),
+        QStringLiteral("权限"),
+    });
+    recovery_flow_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    recovery_flow_->setSelectionMode(QAbstractItemView::SingleSelection);
+    recovery_flow_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    recovery_flow_->verticalHeader()->setVisible(false);
+    recovery_flow_->horizontalHeader()->setSectionResizeMode(
+        2, QHeaderView::Stretch);
+    recovery_flow_->horizontalHeader()->setSectionResizeMode(
+        4, QHeaderView::Stretch);
+    recovery_flow_->setMinimumHeight(120);
+    recovery_flow_->setMaximumHeight(240);
+    event_layout->addWidget(recovery_flow_);
+
     auto* issues_label = new QLabel(QStringLiteral("Issue 状态"), event_tab);
     issues_label->setObjectName(QStringLiteral("sectionLabel"));
     issues_label->setFont(section_font);
@@ -980,6 +1078,21 @@ void QtMainWindow::build_ui() {
     event_timeline_->verticalHeader()->setVisible(false);
     event_timeline_->horizontalHeader()->setStretchLastSection(true);
     event_layout->addWidget(event_timeline_, 2);
+
+    connect(
+        recovery_flow_,
+        &QTableWidget::cellDoubleClicked,
+        this,
+        [this](int row, int) {
+            auto* item = recovery_flow_->item(row, 0);
+            if (!item) return;
+            const auto task_id =
+                item->data(Qt::UserRole).toString().toUtf8().toStdString();
+            if (task_id.empty()) return;
+            selected_task_id_ = task_id;
+            render_project();
+            if (tabs_) tabs_->setCurrentIndex(1);
+        });
 
     connect(issues_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
         auto* item = issues_->item(row, 0);
@@ -2026,8 +2139,10 @@ void QtMainWindow::copy_debug_summary() {
 }
 
 void QtMainWindow::render_event_timeline() {
-    if (!event_status_ || !issues_ || !event_timeline_) return;
+    if (!event_status_ || !recovery_flow_ || !issues_ || !event_timeline_)
+        return;
 
+    recovery_flow_->setRowCount(0);
     issues_->setRowCount(0);
     event_timeline_->setRowCount(0);
 
@@ -2039,15 +2154,34 @@ void QtMainWindow::render_event_timeline() {
     }
 
     const auto& projection = found->second;
+    std::size_t unresolved = 0;
+    std::size_t waiting_verification = 0;
+    std::size_t waiting_decision = 0;
+    for (const auto& issue : projection.issues) {
+        if (!issue.resolved) ++unresolved;
+        const auto stage = issue_recovery_stage(issue);
+        if (stage == "waiting_verification" ||
+            stage == "recovery_verification")
+            ++waiting_verification;
+        if (stage == "needs_user") ++waiting_decision;
+    }
+
     event_status_->setText(
-        QStringLiteral("协议事件 %1 · Issue %2 · 重复 %3 · 无效 %4")
-            .arg(static_cast<qulonglong>(projection.events.size()))
-            .arg(static_cast<qulonglong>(projection.issues.size()))
-            .arg(static_cast<qulonglong>(projection.duplicate_events))
-            .arg(static_cast<qulonglong>(projection.malformed_lines)));
+        QStringLiteral(
+            "未解决 %1 · 等待恢复验证 %2 · 等待决策 %3 · 协议事件 %4")
+            .arg(static_cast<qulonglong>(unresolved))
+            .arg(static_cast<qulonglong>(waiting_verification))
+            .arg(static_cast<qulonglong>(waiting_decision))
+            .arg(static_cast<qulonglong>(projection.events.size())));
 
     QStringList diagnostics;
-    diagnostics << QStringLiteral("事件文件：%1").arg(q(projection.source_path.string()));
+    diagnostics
+        << QStringLiteral("事件文件：%1")
+               .arg(q(projection.source_path.string()))
+        << QStringLiteral("重复事件：%1")
+               .arg(static_cast<qulonglong>(projection.duplicate_events))
+        << QStringLiteral("无效事件：%1")
+               .arg(static_cast<qulonglong>(projection.malformed_lines));
     for (const auto& item : projection.diagnostics)
         diagnostics << QStringLiteral("• ") + q(item);
     event_status_->setToolTip(diagnostics.join(QStringLiteral("\n")));
@@ -2063,6 +2197,71 @@ void QtMainWindow::render_event_timeline() {
             if (lhs->resolved != rhs->resolved) return !lhs->resolved;
             return lhs->last_event_at > rhs->last_event_at;
         });
+
+    recovery_flow_->setRowCount(
+        static_cast<int>(issue_rows.size()));
+    for (int row = 0;
+         row < static_cast<int>(issue_rows.size());
+         ++row) {
+        const auto& issue =
+            *issue_rows[static_cast<std::size_t>(row)];
+        const auto stage = issue_recovery_stage(issue);
+
+        auto* task = new QTableWidgetItem(
+            issue.task_id.empty()
+                ? QStringLiteral("—")
+                : q(issue.task_id));
+        task->setData(Qt::UserRole, q(issue.task_id));
+        recovery_flow_->setItem(row, 0, task);
+        recovery_flow_->setItem(
+            row,
+            1,
+            new QTableWidgetItem(q(issue.issue_id)));
+
+        auto* flow =
+            new QTableWidgetItem(recovery_flow_text(issue));
+        flow->setToolTip(
+            QStringLiteral(
+                "动作完成不等于恢复完成；只有 Monitor 独立验证恢复后，"
+                "流程才会进入“恢复已验证”。"));
+        recovery_flow_->setItem(row, 2, flow);
+
+        auto* stage_item = new QTableWidgetItem(
+            q(issue_recovery_stage_display_name(stage)));
+        emphasize_item(
+            stage_item,
+            recovery_stage_color(stage));
+        recovery_flow_->setItem(row, 3, stage_item);
+
+        auto* next = new QTableWidgetItem(
+            q(issue_recovery_next_step(issue)));
+        QStringList detail;
+        if (!issue.current_action.empty())
+            detail << QStringLiteral("当前动作：") +
+                          q(issue.current_action);
+        if (!issue.summary.empty())
+            detail << QStringLiteral("Issue：") +
+                          q(issue.summary);
+        if (!detail.isEmpty())
+            next->setToolTip(detail.join(QStringLiteral("\n")));
+        recovery_flow_->setItem(row, 4, next);
+
+        auto* authority = new QTableWidgetItem(
+            issue.authority.empty()
+                ? QStringLiteral("—")
+                : q(issue.authority));
+        if (issue.authority == "L3")
+            emphasize_item(
+                authority,
+                QColor(QStringLiteral("#9A641F")));
+        else if (issue.authority == "L1" ||
+                 issue.authority == "L2")
+            emphasize_item(
+                authority,
+                QColor(QStringLiteral("#4E6B8A")));
+        recovery_flow_->setItem(row, 5, authority);
+    }
+    recovery_flow_->resizeColumnsToContents();
 
     issues_->setRowCount(static_cast<int>(issue_rows.size()));
     for (int row = 0; row < static_cast<int>(issue_rows.size()); ++row) {
