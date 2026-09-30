@@ -9,6 +9,7 @@ find_package(Boost 1.82 REQUIRED)
 
 add_library(monitor_hub_core
     src/core.cpp
+    src/control_orchestrator.cpp
     src/dispatch_worker.cpp
     src/deterministic_handlers.cpp
     src/command_control.cpp
@@ -45,6 +46,10 @@ install(TARGETS monitor_hub_control RUNTIME DESTINATION bin)
 add_executable(monitor_hub_worker src/worker_main.cpp)
 target_link_libraries(monitor_hub_worker PRIVATE monitor_hub_core)
 install(TARGETS monitor_hub_worker RUNTIME DESTINATION bin)
+
+add_executable(monitor_hub_orchestrator src/orchestrator_main.cpp)
+target_link_libraries(monitor_hub_orchestrator PRIVATE monitor_hub_core)
+install(TARGETS monitor_hub_orchestrator RUNTIME DESTINATION bin)
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/../hub/claude_statusline_bridge.py"
     DESTINATION share/monitor_hub
@@ -154,6 +159,19 @@ if(BUILD_TESTING)
     add_test(
         NAME monitor_hub_setup_policy_bootstrap_tests
         COMMAND monitor_hub_setup_policy_bootstrap_tests
+    )
+
+    add_executable(
+        monitor_hub_control_orchestrator_tests
+        tests/control_orchestrator_tests.cpp
+    )
+    target_link_libraries(
+        monitor_hub_control_orchestrator_tests
+        PRIVATE monitor_hub_core
+    )
+    add_test(
+        NAME monitor_hub_control_orchestrator_tests
+        COMMAND monitor_hub_control_orchestrator_tests
     )
 
     add_test(
