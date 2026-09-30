@@ -9,6 +9,7 @@ find_package(Boost 1.82 REQUIRED)
 
 add_library(monitor_hub_core
     src/core.cpp
+    src/dispatch_worker.cpp
     src/command_control.cpp
     src/event_store.cpp
     src/overview.cpp
@@ -39,6 +40,10 @@ install(TARGETS monitor_hub_cli RUNTIME DESTINATION bin)
 add_executable(monitor_hub_control src/control_main.cpp)
 target_link_libraries(monitor_hub_control PRIVATE monitor_hub_core)
 install(TARGETS monitor_hub_control RUNTIME DESTINATION bin)
+
+add_executable(monitor_hub_worker src/worker_main.cpp)
+target_link_libraries(monitor_hub_worker PRIVATE monitor_hub_core)
+install(TARGETS monitor_hub_worker RUNTIME DESTINATION bin)
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/../hub/claude_statusline_bridge.py"
     DESTINATION share/monitor_hub
@@ -103,5 +108,18 @@ if(BUILD_TESTING)
     add_test(
         NAME monitor_hub_command_control_tests
         COMMAND monitor_hub_command_control_tests
+    )
+
+    add_executable(
+        monitor_hub_dispatch_worker_tests
+        tests/dispatch_worker_tests.cpp
+    )
+    target_link_libraries(
+        monitor_hub_dispatch_worker_tests
+        PRIVATE monitor_hub_core
+    )
+    add_test(
+        NAME monitor_hub_dispatch_worker_tests
+        COMMAND monitor_hub_dispatch_worker_tests
     )
 endif()
