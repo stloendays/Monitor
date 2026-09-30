@@ -32,7 +32,7 @@ stage/
     ...
 ```
 
-`windeployqt` deploys the Qt runtime into the staged `bin` directory.
+`windeployqt` deploys the Qt runtime into the staged `bin` directory. The packaging script then copies the official x64 Microsoft Visual C++ CRT DLLs from the active Visual Studio Redist tree into the same directory. This app-local CRT layout is required because `windeployqt --compiler-runtime` may emit only `vc_redist.x64.exe`; the portable ZIP and per-user installer must not depend on a separate system-wide redistributable installation.
 
 The release marker uses the existing updater marker contract:
 
@@ -118,14 +118,15 @@ The Windows Qt workflow should validate the package, not just the developer buil
 1. build Qt + CLI;
 2. stage CMake install;
 3. run `windeployqt`;
-4. generate update ZIP + checksum;
-5. generate portable ZIP;
-6. compile NSIS installer;
-7. silently install into a temporary path;
-8. run installed `monitor_hub_qt.exe --desktop-diagnostics`;
-9. silently uninstall;
-10. verify the installed executable was removed;
-11. upload PR artifacts for inspection.
+4. stage app-local MSVC x64 CRT DLLs and smoke-test the staged executable;
+5. generate update ZIP + checksum;
+6. generate portable ZIP;
+7. compile NSIS installer;
+8. silently install into a temporary path;
+9. run installed `monitor_hub_qt.exe --desktop-diagnostics`;
+10. silently uninstall;
+11. verify the installed executable was removed;
+12. upload PR artifacts for inspection.
 
 ## Local packaging
 
@@ -155,3 +156,25 @@ After the branch stacks converge, the Release workflow should:
 - use the desktop entrypoint when the native Qt update/restart flow is ready.
 
 Until then, feature/PR packaging is only CI validation and artifact inspection, never a stable release.
+
+
+## MSVC runtime policy
+
+Monitor Hub's Windows artifacts use an **app-local** Visual C++ runtime.
+
+The packaging script searches, in order, from the active build environment and Visual Studio installation for the x64 `Microsoft.VC*.CRT` Redist directory, then copies its DLLs into `stage/bin`.
+
+At minimum the staged layout must contain:
+
+- `vcruntime140.dll`;
+- `msvcp140.dll`.
+
+The script copies the full matching CRT DLL set rather than guessing only the currently observed imports. This protects the Qt executable, CLI, and deployed Qt plugins from minor toolchain/runtime dependency differences.
+
+The bundled `vc_redist.x64.exe` produced by some `windeployqt` versions is not treated as a substitute for app-local DLLs because:
+
+- the portable ZIP does not run installers;
+- the NSIS package is per-user and should not silently install a machine-wide prerequisite;
+- the update payload must remain self-contained.
+
+A missing CRT Redist directory remains a packaging failure rather than being silently ignored.
