@@ -239,3 +239,27 @@ The sidebar state is conservative:
 - **未发现**: no configured/install candidate is found.
 
 A visible Claude process is not treated as proof that a specific cached session is alive.
+
+
+### Monitor project linking
+
+The Qt Claude card attempts a local path-only association between the current Claude workspace and registered Monitor Hub projects.
+
+Claude-side candidates:
+
+- `workspace.project_dir`;
+- `workspace.current_dir` / `cwd`.
+
+Monitor project candidates:
+
+- `dir`;
+- `qa_cwd`;
+- `runner.workdir`;
+- parent directory of `status_json`;
+- parent directory of `status_md`.
+
+Matching is path-based and case-insensitive for Windows-friendly behavior. Exact matches and ancestor/descendant relationships are accepted; when several projects match, the most specific (longest) project path wins.
+
+Monitor Hub does not link projects by display name.
+
+When a match exists, the Claude card shows the associated Monitor project and enables **关联项目**, which selects that project and opens its project view. When no path match exists, the button remains disabled.
