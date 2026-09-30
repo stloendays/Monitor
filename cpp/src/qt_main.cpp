@@ -1,4 +1,5 @@
 #include "monitor_hub/qt_desktop_controller.hpp"
+#include "monitor_hub/qt_desktop_settings.hpp"
 #include "monitor_hub/qt_main_window.hpp"
 
 #include <QApplication>
@@ -21,6 +22,7 @@ int main(int argc, char** argv) {
     auto paths = monitor_hub::runtime_paths_from_env(
         argc > 0 ? std::filesystem::path(argv[0]) : std::filesystem::path{});
     bool background_requested = false;
+    bool diagnostics_requested = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -29,15 +31,24 @@ int main(int argc, char** argv) {
         else if (arg == "--job-root" && i + 1 < argc) paths.job_root = argv[++i];
         else if (arg == "--no-discovery") paths.discovery = false;
         else if (arg == "--background") background_requested = true;
+        else if (arg == "--desktop-diagnostics") diagnostics_requested = true;
         else if (arg == "--help" || arg == "-h") {
             std::cout
                 << "monitor_hub_qt [--registry FILE] [--hub-data DIR] "
-                   "[--job-root DIR] [--no-discovery] [--background]\n";
+                   "[--job-root DIR] [--no-discovery] [--background] "
+                   "[--desktop-diagnostics]\n";
             return 0;
         } else {
             std::cerr << "unknown argument: " << arg << "\n";
             return 2;
         }
+    }
+
+    if (diagnostics_requested) {
+        const auto diagnostics = monitor_hub::desktop_diagnostics_text().toUtf8();
+        std::cout.write(diagnostics.constData(), diagnostics.size());
+        std::cout << '\n';
+        return 0;
     }
 
     monitor_hub::QtMainWindow window(std::move(paths));
