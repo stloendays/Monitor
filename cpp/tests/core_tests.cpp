@@ -189,9 +189,16 @@ int main() {
 
     // Claude CLI status is read from the zero-token statusLine bridge snapshot.
     const auto claude_status_file = paths.hub_data / "claude" / "cli_status.json";
+    const auto claude_transcript = root / "claude-session.jsonl";
+    write_file(
+        claude_transcript,
+        "{\"type\":\"assistant\",\"timestamp\":\"2026-09-30T10:14:58\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Read\",\"input\":{\"file_path\":\"secret.txt\"}}]}}\n"
+        "{\"type\":\"assistant\",\"timestamp\":\"2026-09-30T10:14:59\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Agent\",\"input\":{\"subagent_type\":\"general-purpose\",\"prompt\":\"do not expose this prompt\"}}]}}\n");
     write_file(
         claude_status_file,
-        R"({"schema_version":1,"source":"claude_statusline","captured_at":"2026-09-30T10:15:00","version":"2.1.259","model":{"id":"claude-sonnet-5","display_name":"Claude Sonnet 5"},"workspace":{"current_dir":"C:/demo"},"context_window":{"used_percentage":31.5},"cost":{"total_cost_usd":1.23},"rate_limits_available":true,"rate_limits":{"five_hour":{"used_percentage":24.0,"resets_at":1788062400},"seven_day":{"used_percentage":13.0,"resets_at":1788580800}}})");
+        std::string(R"({"schema_version":1,"source":"claude_statusline","captured_at":"2026-09-30T10:15:00","version":"2.1.259","session":{"id":"sess-123","name":"monitor-work","prompt_id":"prompt-456","transcript_path":")") +
+        claude_transcript.string() +
+        R"("},"model":{"id":"claude-sonnet-5","display_name":"Claude Sonnet 5"},"workspace":{"current_dir":"C:/demo","project_dir":"C:/demo","git_worktree":"feature-monitor"},"agent":{"name":"monitor-agent","type":"general-purpose"},"context_window":{"used_percentage":31.5},"cost":{"total_cost_usd":1.23},"rate_limits_available":true,"rate_limits":{"five_hour":{"used_percentage":24.0,"resets_at":1788062400},"seven_day":{"used_percentage":13.0,"resets_at":1788580800}}})");
     SystemInfo claude_sys;
     claude_sys.procs.push_back(ProcessInfo{1234, "claude.exe", "claude"});
     const auto claude = load_claude_cli_status(claude_sys, paths);
@@ -199,6 +206,15 @@ int main() {
     assert(claude.source == "claude_statusline");
     assert(claude.version == "2.1.259");
     assert(claude.model == "Claude Sonnet 5");
+    assert(claude.session_id == "sess-123");
+    assert(claude.session_name == "monitor-work");
+    assert(claude.prompt_id == "prompt-456");
+    assert(claude.project_dir == "C:/demo");
+    assert(claude.git_worktree == "feature-monitor");
+    assert(claude.agent_name == "monitor-agent");
+    assert(claude.agent_type == "general-purpose");
+    assert(claude.recent_tool == "Agent");
+    assert(claude.recent_agent == "Agent · general-purpose");
     assert(claude.rate_limits_available);
     assert(claude.five_hour.used_percentage &&
            *claude.five_hour.used_percentage == 24.0);
