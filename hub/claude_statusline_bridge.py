@@ -48,8 +48,8 @@ def _usage_window(rate_limits: dict, key: str) -> dict | None:
     if used is None and reset is None:
         return None
     out = {}
-    if used is not None:
-        out["used_percentage"] = max(0.0, min(100.0, float(used)))
+    if used is not None and 0.0 <= float(used) <= 100.0:
+        out["used_percentage"] = float(used)
     if reset is not None:
         out["resets_at"] = float(reset)
     return out
@@ -75,7 +75,7 @@ def _sanitize(payload: dict) -> dict:
             "display_name": str(model.get("display_name") or model.get("id") or ""),
         },
         "workspace": {
-            "current_dir": str(workspace.get("current_dir") or ""),
+            "current_dir": str(workspace.get("current_dir") or payload.get("cwd") or ""),
             "project_dir": str(workspace.get("project_dir") or ""),
         },
         "context_window": {},
