@@ -46,6 +46,7 @@ if(MONITOR_HUB_BUILD_QT)
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/monitor_hub.png"
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/monitor_hub.svg"
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/styles/modern.qss"
     )
     if(WIN32)
         enable_language(RC)
