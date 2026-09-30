@@ -295,9 +295,6 @@ void QtMainWindow::build_ui() {
         quick_bar));
     quick_layout->addLayout(quick_head);
 
-    auto* quick_buttons = new QHBoxLayout();
-    quick_buttons->setSpacing(7);
-
     auto make_quick = [quick_bar](const QString& text, const QString& tip) {
         auto* button = new QPushButton(text, quick_bar);
         button->setProperty("role", QStringLiteral("quick"));
@@ -326,6 +323,15 @@ void QtMainWindow::build_ui() {
     quick_takeovers_ = make_quick(
         QStringLiteral("后台记录"),
         QStringLiteral("切换到后台处理记录，查看 Monitor 启动的 Agent/takeover 历史。"));
+    quick_registry_ = make_quick(
+        QStringLiteral("登记表"),
+        QStringLiteral("打开 monitor_hub_projects.json。项目没有出现在侧边栏时，先检查这里的 id、路径和 runner 配置。"));
+    quick_hub_data_ = make_quick(
+        QStringLiteral("Hub 数据"),
+        QStringLiteral("打开 Monitor Hub 本地数据目录，用来检查 requests、events、outbox 等运行数据。"));
+    quick_job_root_ = make_quick(
+        QStringLiteral("作业目录"),
+        QStringLiteral("打开 cdesktop-jobs 目录，用来检查 detached monitor / child-agent 的 pid、exitcode、output.log。"));
     quick_copy_command_ = make_quick(
         QStringLiteral("复制命令"),
         QStringLiteral("复制当前任务命令；没有任务命令时尝试复制项目 runner/start command。不会执行。"));
@@ -333,14 +339,25 @@ void QtMainWindow::build_ui() {
         QStringLiteral("复制诊断"),
         QStringLiteral("把当前项目、状态、runner、关键路径和选中任务信息复制到剪贴板，便于发给 Agent 排查。不会复制密码或 token。"));
 
+    auto* project_actions = new QHBoxLayout();
+    project_actions->setSpacing(7);
     for (auto* button : {
              quick_refresh_, quick_monitor_dir_, quick_status_, quick_log_,
-             quick_task_dir_, quick_result_, quick_takeovers_,
-             quick_copy_command_, quick_copy_debug_}) {
-        quick_buttons->addWidget(button);
+             quick_task_dir_, quick_result_, quick_takeovers_}) {
+        project_actions->addWidget(button);
     }
-    quick_buttons->addStretch();
-    quick_layout->addLayout(quick_buttons);
+    project_actions->addStretch();
+    quick_layout->addLayout(project_actions);
+
+    auto* system_actions = new QHBoxLayout();
+    system_actions->setSpacing(7);
+    for (auto* button : {
+             quick_registry_, quick_hub_data_, quick_job_root_,
+             quick_copy_command_, quick_copy_debug_}) {
+        system_actions->addWidget(button);
+    }
+    system_actions->addStretch();
+    quick_layout->addLayout(system_actions);
 
     connect(quick_refresh_, &QPushButton::clicked, this, [this] {
         this->refresh();
@@ -366,6 +383,15 @@ void QtMainWindow::build_ui() {
     });
     connect(quick_takeovers_, &QPushButton::clicked, this, [this] {
         if (tabs_) tabs_->setCurrentIndex(2);
+    });
+    connect(quick_registry_, &QPushButton::clicked, this, [this] {
+        open_quick_target("registry");
+    });
+    connect(quick_hub_data_, &QPushButton::clicked, this, [this] {
+        open_quick_target("hub_data");
+    });
+    connect(quick_job_root_, &QPushButton::clicked, this, [this] {
+        open_quick_target("job_root");
     });
     connect(quick_copy_command_, &QPushButton::clicked, this, [this] {
         const auto* meta = selected_task_meta();
@@ -840,6 +866,17 @@ void QtMainWindow::refresh_quick_actions() {
     if (quick_task_dir_) quick_task_dir_->setEnabled(!task_dir.empty());
     if (quick_result_) quick_result_->setEnabled(!result_path.empty());
     if (quick_takeovers_) quick_takeovers_->setEnabled(project != nullptr);
+    if (quick_registry_) {
+        std::error_code ec;
+        const bool exists = std::filesystem::exists(paths_.registry, ec) && !ec;
+        const auto parent = paths_.registry.parent_path();
+        std::error_code parent_ec;
+        const bool parent_exists =
+            !parent.empty() && std::filesystem::exists(parent, parent_ec) && !parent_ec;
+        quick_registry_->setEnabled(exists || parent_exists);
+    }
+    if (quick_hub_data_) quick_hub_data_->setEnabled(local_exists(paths_.hub_data.string()));
+    if (quick_job_root_) quick_job_root_->setEnabled(local_exists(paths_.job_root.string()));
     if (quick_copy_command_) quick_copy_command_->setEnabled(!command.empty());
     if (quick_copy_debug_) quick_copy_debug_->setEnabled(project != nullptr);
 }
@@ -1181,6 +1218,19 @@ void QtMainWindow::open_quick_target(const std::string& kind) {
                 }
             }
         }
+    } else if (kind == "registry") {
+        if (local_exists(paths_.registry.string())) {
+            target = paths_.registry.string();
+        } else {
+            std::error_code ec;
+            const auto parent = paths_.registry.parent_path();
+            if (!parent.empty() && std::filesystem::exists(parent, ec) && !ec)
+                target = parent.string();
+        }
+    } else if (kind == "hub_data") {
+        if (local_exists(paths_.hub_data.string())) target = paths_.hub_data.string();
+    } else if (kind == "job_root") {
+        if (local_exists(paths_.job_root.string())) target = paths_.job_root.string();
     }
 
     if (!target.empty()) open_local(target);
