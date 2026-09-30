@@ -51,7 +51,7 @@ Section "Monitor Hub" SEC_MAIN
   WriteRegStr HKCU "Software\Monitor\MonitorHubInstaller" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "DisplayName" "Monitor Hub"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "Publisher" "Monitor"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "Publisher" "Monitor Hub"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "DisplayIcon" "$INSTDIR\bin\monitor_hub_qt.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "UninstallString" '"$INSTDIR\Uninstall.exe"'
