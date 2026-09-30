@@ -269,7 +269,8 @@ void read_processes(SystemInfo& out) {
     BSTR lang = SysAllocString(L"WQL");
     BSTR query = SysAllocString(
         L"SELECT ProcessId, Name, CommandLine FROM Win32_Process WHERE "
-        L"Name='pwsh.exe' OR Name='powershell.exe' OR Name='python.exe' OR Name='pythonw.exe' OR Name='claude.exe'");
+        L"Name='pwsh.exe' OR Name='powershell.exe' OR Name='python.exe' OR Name='pythonw.exe' OR "
+        L"Name='claude.exe' OR Name='node.exe'");
     ComPtr<IEnumWbemClassObject> enumerator;
     hr = services->ExecQuery(lang, query, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
                              nullptr, enumerator.GetAddressOf());
