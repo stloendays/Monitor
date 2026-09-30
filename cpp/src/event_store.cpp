@@ -109,6 +109,13 @@ bool parse_event(
     if (payload) {
         event.summary = payload_summary(*payload);
         event.authority = payload_authority(*payload);
+        event.notification_id = str(payload->if_contains("notification_id"));
+        event.notification_target = str(payload->if_contains("target"));
+        event.notification_reason = str(payload->if_contains("reason"));
+        if (event.task_id.empty())
+            event.task_id = str(payload->if_contains("task_id"));
+        if (event.issue_id.empty())
+            event.issue_id = str(payload->if_contains("issue_id"));
         event.evidence_refs = payload_evidence_refs(*payload);
     }
 
@@ -128,6 +135,12 @@ void update_issue_projection(
     ProjectEventProjection& out,
     std::map<std::string, std::size_t>& issue_index,
     const EventRecord& event) {
+
+    const bool issue_related =
+        starts_with(event.event_type, "issue.") ||
+        starts_with(event.event_type, "agent.") ||
+        event.event_type == "task.restarted";
+    if (!issue_related) return;
 
     if (event.issue_id.empty()) {
         if (starts_with(event.event_type, "issue."))

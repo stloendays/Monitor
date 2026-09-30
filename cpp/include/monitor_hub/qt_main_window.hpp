@@ -59,6 +59,7 @@ private:
     void copy_debug_summary();
     void copy_claude_statusline_setup();
     void open_claude_config();
+    void open_new_monitor_dialog();
 
     RuntimePaths paths_;
     SystemInfo system_;
@@ -70,6 +71,7 @@ private:
     std::string claude_linked_project_id_;
 
     QListWidget* project_list_ = nullptr;
+    QPushButton* new_monitor_ = nullptr;
     QLabel* claude_cli_state_ = nullptr;
     QLabel* claude_cli_meta_ = nullptr;
     QLabel* claude_session_ = nullptr;

@@ -23,6 +23,9 @@ struct EventRecord {
     std::string source_id;
     std::string summary;
     std::string authority;
+    std::string notification_id;
+    std::string notification_target;
+    std::string notification_reason;
     std::vector<std::string> evidence_refs;
 };
 

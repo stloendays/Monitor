@@ -11,6 +11,8 @@ add_library(monitor_hub_core
     src/core.cpp
     src/event_store.cpp
     src/overview.cpp
+    src/notification_outbox.cpp
+    src/setup_request.cpp
     src/claude_cli.cpp
     src/windows_probe.cpp
     src/boost_json.cpp
