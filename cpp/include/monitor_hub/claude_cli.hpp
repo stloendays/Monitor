@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace monitor_hub {
 
@@ -51,5 +52,9 @@ struct ClaudeCliStatus {
 ClaudeCliStatus load_claude_cli_status(
     const SystemInfo& system,
     const RuntimePaths& paths);
+
+std::string match_claude_workspace_project(
+    const ClaudeCliStatus& status,
+    const std::vector<json::object>& projects);
 
 }  // namespace monitor_hub

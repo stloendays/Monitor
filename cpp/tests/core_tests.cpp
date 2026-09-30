@@ -218,6 +218,33 @@ int main() {
     assert(claude.agent_type == "general-purpose");
     assert(claude.recent_tool == "Agent");
     assert(claude.recent_agent == "Agent · general-purpose");
+
+    std::vector<json::object> claude_link_projects;
+    json::object broad_project;
+    broad_project["id"] = "broad";
+    broad_project["dir"] = "C:/demo";
+    claude_link_projects.push_back(broad_project);
+
+    json::object specific_project;
+    specific_project["id"] = "specific";
+    json::object specific_runner;
+    specific_runner["workdir"] = "C:\\DEMO\\project";
+    specific_project["runner"] = specific_runner;
+    claude_link_projects.push_back(specific_project);
+
+    ClaudeCliStatus link_status;
+    link_status.project_dir = "c:/demo/project/work";
+    assert(match_claude_workspace_project(link_status, claude_link_projects) ==
+           "specific");
+
+    link_status.project_dir.clear();
+    link_status.cwd = "C:/demo/other";
+    assert(match_claude_workspace_project(link_status, claude_link_projects) ==
+           "broad");
+
+    link_status.cwd = "D:/unrelated";
+    assert(match_claude_workspace_project(link_status, claude_link_projects).empty());
+
     assert(claude.rate_limits_available);
     assert(claude.five_hour.used_percentage &&
            *claude.five_hour.used_percentage == 24.0);
