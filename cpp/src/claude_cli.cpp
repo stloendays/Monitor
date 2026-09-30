@@ -42,7 +42,7 @@ std::filesystem::path env_path(const char* name) {
 bool path_exists(const std::filesystem::path& path) {
     if (path.empty()) return false;
     std::error_code ec;
-    return std::filesystem::path_exists(path, ec) && !ec;
+    return std::filesystem::exists(path, ec) && !ec;
 }
 
 std::filesystem::path first_existing(
