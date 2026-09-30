@@ -599,7 +599,7 @@ void QtMainWindow::build_ui() {
         open_quick_target("result");
     });
     connect(quick_takeovers_, &QPushButton::clicked, this, [this] {
-        if (tabs_) tabs_->setCurrentIndex(2);
+        if (tabs_) tabs_->setCurrentIndex(3);
     });
     connect(quick_registry_, &QPushButton::clicked, this, [this] {
         open_quick_target("registry");
@@ -657,8 +657,8 @@ void QtMainWindow::build_ui() {
     overview_counts_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     overview_head->addWidget(overview_counts_, 1);
     overview_head->addWidget(info_button(
-        QStringLiteral("总览只汇总 normalized project snapshot 和 takeover 记录；"
-                       "不会从 raw log 自己推断业务状态。双击表格行可跳到对应项目。"),
+        QStringLiteral("总览汇总 normalized project snapshot、Protocol v1 事件和 takeover 记录；"
+                       "不会从 raw log 自己推断业务状态。双击表格行可下钻到对应项目。"),
         overview_tab));
     overview_layout->addLayout(overview_head);
 
@@ -752,17 +752,19 @@ void QtMainWindow::build_ui() {
         auto* item = overview_attention_->item(row, 1);
         if (!item) return;
         const auto id = item->data(Qt::UserRole).toString().toUtf8().toStdString();
+        const auto source = item->data(Qt::UserRole + 1).toString();
         if (id.empty()) return;
         select_project(id);
-        tabs_->setCurrentIndex(1);
+        tabs_->setCurrentIndex(source == QStringLiteral("event") ? 2 : 1);
     });
     connect(overview_agents_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
         auto* item = overview_agents_->item(row, 1);
         if (!item) return;
         const auto id = item->data(Qt::UserRole).toString().toUtf8().toStdString();
+        const auto source = item->data(Qt::UserRole + 1).toString();
         if (id.empty()) return;
         select_project(id);
-        tabs_->setCurrentIndex(2);
+        tabs_->setCurrentIndex(source == QStringLiteral("event") ? 2 : 3);
     });
     tabs_->addTab(overview_tab, QStringLiteral("总览"));
 
@@ -870,6 +872,85 @@ void QtMainWindow::build_ui() {
     connect(copy_command_, &QPushButton::clicked, this, [this] { copy_task_command(); });
     tabs_->addTab(progress_tab, QStringLiteral("进度"));
 
+    // First-class Issue / Agent Event timeline.
+    auto* event_tab = new QWidget(tabs_);
+    auto* event_layout = new QVBoxLayout(event_tab);
+    event_layout->setContentsMargins(6, 6, 6, 6);
+    event_layout->setSpacing(8);
+
+    auto* event_head = new QHBoxLayout();
+    auto* event_label = new QLabel(QStringLiteral("问题与 Agent"), event_tab);
+    event_label->setObjectName(QStringLiteral("pageSectionTitle"));
+    event_label->setFont(overview_title_font);
+    event_head->addWidget(event_label);
+    event_status_ = new QLabel(QStringLiteral("等待协议事件"), event_tab);
+    event_status_->setObjectName(QStringLiteral("summaryText"));
+    event_status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    event_head->addWidget(event_status_, 1);
+    event_head->addWidget(info_button(
+        QStringLiteral("读取 MONITOR_HUB_DATA/events/<project_id>.jsonl 的 Protocol v1 事件。"
+                       "Issue、Agent 动作和恢复验证按稳定 ID 关联；"
+                       "Agent 动作完成不等于 Issue 已解决，必须有后续恢复验证/解决事件。"),
+        event_tab));
+    event_layout->addLayout(event_head);
+
+    auto* issues_label = new QLabel(QStringLiteral("Issue 状态"), event_tab);
+    issues_label->setObjectName(QStringLiteral("sectionLabel"));
+    issues_label->setFont(section_font);
+    event_layout->addWidget(issues_label);
+
+    issues_ = new QTableWidget(event_tab);
+    configure_table(issues_);
+    issues_->setColumnCount(6);
+    issues_->setHorizontalHeaderLabels({
+        QStringLiteral("任务"),
+        QStringLiteral("Issue"),
+        QStringLiteral("阶段"),
+        QStringLiteral("权限"),
+        QStringLiteral("当前动作"),
+        QStringLiteral("摘要"),
+    });
+    issues_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    issues_->setSelectionMode(QAbstractItemView::SingleSelection);
+    issues_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    issues_->verticalHeader()->setVisible(false);
+    issues_->horizontalHeader()->setStretchLastSection(true);
+    event_layout->addWidget(issues_, 1);
+
+    auto* timeline_label = new QLabel(QStringLiteral("事件时间线"), event_tab);
+    timeline_label->setObjectName(QStringLiteral("sectionLabel"));
+    timeline_label->setFont(section_font);
+    event_layout->addWidget(timeline_label);
+
+    event_timeline_ = new QTableWidget(event_tab);
+    configure_table(event_timeline_);
+    event_timeline_->setColumnCount(5);
+    event_timeline_->setHorizontalHeaderLabels({
+        QStringLiteral("时间"),
+        QStringLiteral("事件"),
+        QStringLiteral("任务"),
+        QStringLiteral("来源"),
+        QStringLiteral("摘要"),
+    });
+    event_timeline_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    event_timeline_->setSelectionMode(QAbstractItemView::SingleSelection);
+    event_timeline_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    event_timeline_->verticalHeader()->setVisible(false);
+    event_timeline_->horizontalHeader()->setStretchLastSection(true);
+    event_layout->addWidget(event_timeline_, 2);
+
+    connect(issues_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
+        auto* item = issues_->item(row, 0);
+        if (!item) return;
+        const auto task_id = item->data(Qt::UserRole).toString().toUtf8().toStdString();
+        if (task_id.empty()) return;
+        selected_task_id_ = task_id;
+        render_project();
+        if (tabs_) tabs_->setCurrentIndex(1);
+    });
+
+    tabs_->addTab(event_tab, QStringLiteral("问题与 Agent"));
+
     auto* takeover_tab = new QWidget(tabs_);
     auto* takeover_layout = new QVBoxLayout(takeover_tab);
     auto* takeover_head = new QHBoxLayout();
@@ -932,9 +1013,12 @@ void QtMainWindow::refresh() {
     system_ = probe_system_info();
     projects_ = load_projects(system_, paths_);
     snapshots_.clear();
+    event_projections_.clear();
     for (const auto& project : projects_) {
         const auto id = s(project.if_contains("id"));
         snapshots_[id] = snapshot(project, system_, paths_);
+        event_projections_[id] =
+            load_project_event_projection(paths_, id, 500);
     }
     selected_project_ = keep_project;
     if (selected_project_.empty() || !snapshots_.count(selected_project_))
@@ -971,7 +1055,7 @@ std::vector<QtDesktopProjectState> QtMainWindow::desktop_project_states() const 
 
 void QtMainWindow::render_context_header() {
     if (tabs_ && tabs_->currentIndex() == 0) {
-        const auto model = build_overview_model(projects_, snapshots_, 24);
+        const auto model = build_overview_model(projects_, snapshots_, event_projections_, 24);
         const int needs_action =
             model.attention_projects + model.error_projects + model.stale_projects;
 
@@ -1080,14 +1164,14 @@ void QtMainWindow::render_claude_cli_status() {
     const auto workspace = !status.project_dir.empty() ? status.project_dir : status.cwd;
     if (!workspace.empty())
         activity << QStringLiteral("目录 %1").arg(q(workspace));
+    if (!status.recent_tool.empty())
+        activity << QStringLiteral("最近工具 %1 · %2")
+                        .arg(q(status.recent_tool))
+                        .arg(activity_time_text(status.recent_tool_at));
     if (!status.recent_agent.empty())
         activity << QStringLiteral("最近 Agent %1 · %2")
                         .arg(q(status.recent_agent))
                         .arg(activity_time_text(status.recent_agent_at));
-    else if (!status.recent_tool.empty())
-        activity << QStringLiteral("最近工具 %1 · %2")
-                        .arg(q(status.recent_tool))
-                        .arg(activity_time_text(status.recent_tool_at));
     if (!status.git_worktree.empty())
         activity << QStringLiteral("worktree %1").arg(q(status.git_worktree));
     claude_activity_->setText(
@@ -1215,7 +1299,7 @@ void QtMainWindow::render_overview() {
         return;
     }
 
-    const auto model = build_overview_model(projects_, snapshots_, 24);
+    const auto model = build_overview_model(projects_, snapshots_, event_projections_, 24);
     const int needs_action =
         model.attention_projects + model.error_projects + model.stale_projects;
 
@@ -1266,6 +1350,8 @@ void QtMainWindow::render_overview() {
         overview_attention_->setItem(row, 0, kind);
         auto* project = new QTableWidgetItem(q(item.project_name));
         project->setData(Qt::UserRole, q(item.project_id));
+        project->setData(Qt::UserRole + 1, q(item.source));
+        project->setData(Qt::UserRole + 2, q(item.issue_id));
         overview_attention_->setItem(row, 1, project);
         overview_attention_->setItem(row, 2, new QTableWidgetItem(q(item.summary)));
     }
@@ -1281,6 +1367,7 @@ void QtMainWindow::render_overview() {
                 item.label.empty() ? QStringLiteral("—") : q(item.label)));
         auto* project = new QTableWidgetItem(q(item.project_name));
         project->setData(Qt::UserRole, q(item.project_id));
+        project->setData(Qt::UserRole + 1, q(item.source));
         overview_agents_->setItem(row, 1, project);
         auto* state = new QTableWidgetItem(agent_state_text(item.state));
         emphasize_item(state, agent_state_color(item.state));
@@ -1404,6 +1491,7 @@ void QtMainWindow::render_project() {
     notes_->setPlainText(note_lines.join("\n"));
 
     render_task_detail();
+    render_event_timeline();
     render_takeovers();
     render_results();
     render_context_header();
@@ -1686,6 +1774,136 @@ void QtMainWindow::copy_debug_summary() {
     QTimer::singleShot(2600, this, [this] {
         if (quick_feedback_) quick_feedback_->setText(QStringLiteral("只读安全操作"));
     });
+}
+
+void QtMainWindow::render_event_timeline() {
+    if (!event_status_ || !issues_ || !event_timeline_) return;
+
+    issues_->setRowCount(0);
+    event_timeline_->setRowCount(0);
+
+    const auto found = event_projections_.find(selected_project_);
+    if (found == event_projections_.end()) {
+        event_status_->setText(QStringLiteral("当前项目没有事件投影"));
+        event_status_->setToolTip(QString{});
+        return;
+    }
+
+    const auto& projection = found->second;
+    event_status_->setText(
+        QStringLiteral("协议事件 %1 · Issue %2 · 重复 %3 · 无效 %4")
+            .arg(static_cast<qulonglong>(projection.events.size()))
+            .arg(static_cast<qulonglong>(projection.issues.size()))
+            .arg(static_cast<qulonglong>(projection.duplicate_events))
+            .arg(static_cast<qulonglong>(projection.malformed_lines)));
+
+    QStringList diagnostics;
+    diagnostics << QStringLiteral("事件文件：%1").arg(q(projection.source_path.string()));
+    for (const auto& item : projection.diagnostics)
+        diagnostics << QStringLiteral("• ") + q(item);
+    event_status_->setToolTip(diagnostics.join(QStringLiteral("\n")));
+
+    std::vector<const IssueProjection*> issue_rows;
+    issue_rows.reserve(projection.issues.size());
+    for (const auto& issue : projection.issues)
+        issue_rows.push_back(&issue);
+    std::stable_sort(
+        issue_rows.begin(),
+        issue_rows.end(),
+        [](const IssueProjection* lhs, const IssueProjection* rhs) {
+            if (lhs->resolved != rhs->resolved) return !lhs->resolved;
+            return lhs->last_event_at > rhs->last_event_at;
+        });
+
+    issues_->setRowCount(static_cast<int>(issue_rows.size()));
+    for (int row = 0; row < static_cast<int>(issue_rows.size()); ++row) {
+        const auto& issue = *issue_rows[static_cast<std::size_t>(row)];
+
+        auto* task = new QTableWidgetItem(
+            issue.task_id.empty() ? QStringLiteral("—") : q(issue.task_id));
+        task->setData(Qt::UserRole, q(issue.task_id));
+        issues_->setItem(row, 0, task);
+        issues_->setItem(row, 1, new QTableWidgetItem(q(issue.issue_id)));
+
+        auto* state = new QTableWidgetItem(
+            q(issue_state_display_name(issue.state)));
+        if (issue.resolved)
+            emphasize_item(state, QColor(QStringLiteral("#3F7D5A")));
+        else if (issue.user_action_required)
+            emphasize_item(state, QColor(QStringLiteral("#9A641F")));
+        else
+            emphasize_item(state, QColor(QStringLiteral("#4E6B8A")));
+        issues_->setItem(row, 2, state);
+
+        auto* authority = new QTableWidgetItem(
+            issue.authority.empty() ? QStringLiteral("—") : q(issue.authority));
+        if (issue.authority == "L3")
+            emphasize_item(authority, QColor(QStringLiteral("#9A641F")));
+        issues_->setItem(row, 3, authority);
+
+        issues_->setItem(
+            row,
+            4,
+            new QTableWidgetItem(
+                issue.current_action.empty()
+                    ? QStringLiteral("—")
+                    : q(issue.current_action)));
+        issues_->setItem(
+            row,
+            5,
+            new QTableWidgetItem(
+                issue.summary.empty()
+                    ? QStringLiteral("—")
+                    : q(issue.summary)));
+    }
+    issues_->resizeColumnsToContents();
+
+    event_timeline_->setRowCount(static_cast<int>(projection.events.size()));
+    for (int row = 0; row < static_cast<int>(projection.events.size()); ++row) {
+        const auto& event =
+            projection.events[projection.events.size() - 1 -
+                              static_cast<std::size_t>(row)];
+
+        event_timeline_->setItem(
+            row, 0, new QTableWidgetItem(q(short_time(event.occurred_at))));
+
+        auto* type = new QTableWidgetItem(q(event_display_name(event.event_type)));
+        if (event.event_type == "issue.user_action_required" ||
+            event.event_type == "issue.escalated")
+            emphasize_item(type, QColor(QStringLiteral("#9A641F")));
+        else if (event.event_type == "issue.recovery_verified" ||
+                 event.event_type == "issue.resolved")
+            emphasize_item(type, QColor(QStringLiteral("#3F7D5A")));
+        else if (event.severity == "error" || event.severity == "critical" ||
+                 event.event_type == "agent.failed")
+            emphasize_item(type, QColor(QStringLiteral("#A34747")));
+        event_timeline_->setItem(row, 1, type);
+
+        event_timeline_->setItem(
+            row,
+            2,
+            new QTableWidgetItem(
+                event.task_id.empty() ? QStringLiteral("—") : q(event.task_id)));
+
+        QString source = q(event.source_kind);
+        if (!event.source_id.empty())
+            source += QStringLiteral(" · ") + q(event.source_id);
+        event_timeline_->setItem(row, 3, new QTableWidgetItem(source));
+
+        auto* summary = new QTableWidgetItem(
+            event.summary.empty()
+                ? q(event_display_name(event.event_type))
+                : q(event.summary));
+        if (!event.evidence_refs.empty()) {
+            QStringList evidence;
+            evidence << QStringLiteral("Evidence:");
+            for (const auto& ref : event.evidence_refs)
+                evidence << QStringLiteral("• ") + q(ref);
+            summary->setToolTip(evidence.join(QStringLiteral("\n")));
+        }
+        event_timeline_->setItem(row, 4, summary);
+    }
+    event_timeline_->resizeColumnsToContents();
 }
 
 void QtMainWindow::render_takeovers() {

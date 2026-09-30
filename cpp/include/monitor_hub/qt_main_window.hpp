@@ -2,6 +2,7 @@
 
 #include "monitor_hub/core.hpp"
 #include "monitor_hub/claude_cli.hpp"
+#include "monitor_hub/event_store.hpp"
 
 #include <QMainWindow>
 
@@ -44,6 +45,7 @@ private:
     void select_project(const std::string& id);
     void render_project();
     void render_task_detail();
+    void render_event_timeline();
     void render_takeovers();
     void render_results();
 
@@ -62,6 +64,7 @@ private:
     SystemInfo system_;
     std::vector<json::object> projects_;
     std::map<std::string, json::object> snapshots_;
+    std::map<std::string, ProjectEventProjection> event_projections_;
     std::string selected_project_;
     std::string selected_task_id_;
 
@@ -116,6 +119,10 @@ private:
     QPushButton* open_log_ = nullptr;
     QPushButton* open_result_ = nullptr;
     QPushButton* copy_command_ = nullptr;
+
+    QLabel* event_status_ = nullptr;
+    QTableWidget* issues_ = nullptr;
+    QTableWidget* event_timeline_ = nullptr;
 
     QTableWidget* takeovers_ = nullptr;
     QTableWidget* results_ = nullptr;

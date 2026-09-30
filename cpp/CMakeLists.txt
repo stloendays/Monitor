@@ -9,6 +9,7 @@ find_package(Boost 1.82 REQUIRED)
 
 add_library(monitor_hub_core
     src/core.cpp
+    src/event_store.cpp
     src/overview.cpp
     src/claude_cli.cpp
     src/windows_probe.cpp
