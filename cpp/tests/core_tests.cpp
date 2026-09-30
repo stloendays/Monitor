@@ -1,6 +1,7 @@
 #include "monitor_hub/core.hpp"
 #include "monitor_hub/event_store.hpp"
 #include "monitor_hub/overview.hpp"
+#include "monitor_hub/setup_request.hpp"
 #include "monitor_hub/claude_cli.hpp"
 
 #include <boost/json.hpp>
@@ -298,6 +299,49 @@ int main() {
     assert(resolved_events.issues[0].resolved);
     assert(!resolved_events.issues[0].user_action_required);
     assert(!resolved_events.has_user_attention());
+
+    // Qt monitor-request intake uses the same core request materializer
+    // as legacy setup flow, so it can be tested without launching Claude.
+    const auto setup_project_dir = root / "setup-project";
+    fs::create_directories(setup_project_dir);
+    const std::string setup_body =
+        "【监控任务】\n"
+        "项目名称：Qt intake test\n"
+        "项目目录（本机路径）：" + setup_project_dir.string() + "\n"
+        "完成标准：测试完成\n"
+        "允许监控自动做的操作：只读检查\n"
+        "禁止的操作：不删除输出\n";
+    const auto setup_fields = parse_setup_request_fields(setup_body);
+    assert(setup_fields);
+    assert(setup_fields->project_name == "Qt intake test");
+    assert(setup_fields->workdir == setup_project_dir.string());
+
+    const auto setup_launch = prepare_setup_request(
+        paths,
+        setup_body,
+        setup_project_dir,
+        std::string("20300101-010203"));
+    assert(setup_launch.job_name == "hub-setup-20300101-010203");
+    assert(fs::exists(setup_launch.request_file));
+    assert(fs::exists(setup_launch.prompt_file));
+    assert(setup_launch.working_directory == setup_project_dir);
+    assert(read_text(setup_launch.request_file).find("Qt intake test") !=
+           std::string::npos);
+    const auto setup_prompt_text = read_text(setup_launch.prompt_file);
+    assert(setup_prompt_text.find(paths.registry.string()) !=
+           std::string::npos);
+    assert(setup_prompt_text.find(paths.hub_data.string()) !=
+           std::string::npos);
+    assert(setup_prompt_text.find("Agent/Event Protocol v1") !=
+           std::string::npos);
+    assert(setup_prompt_text.find("NEEDS_USER:") !=
+           std::string::npos);
+    assert(setup_launch.command.find("--dangerously-skip-permissions") !=
+           std::string::npos);
+    assert(std::find(
+               setup_launch.arguments.begin(),
+               setup_launch.arguments.end(),
+               setup_launch.job_name) != setup_launch.arguments.end());
 
     fs::remove_all(root);
     std::cout << "core tests passed\n";
