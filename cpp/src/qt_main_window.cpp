@@ -1,5 +1,6 @@
 #include "monitor_hub/qt_main_window.hpp"
 #include "monitor_hub/overview.hpp"
+#include "monitor_hub/setup_request.hpp"
 #include "monitor_hub/windows_probe.hpp"
 
 #include <QApplication>
@@ -9,12 +10,15 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QDialog>
 #include <QFontDatabase>
 #include <QFrame>
 #include <QHeaderView>
 #include <QLabel>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPixmap>
+#include <QProcess>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSplitter>
@@ -308,6 +312,17 @@ void QtMainWindow::build_ui() {
         auto* item = project_list_->item(row);
         if (!item) return;
         select_project(item->data(Qt::UserRole).toString().toUtf8().toStdString());
+    });
+
+    new_monitor_ = new QPushButton(QStringLiteral("＋ 新建监控任务"), sidebar);
+    new_monitor_->setObjectName(QStringLiteral("newMonitorButton"));
+    new_monitor_->setToolTip(
+        QStringLiteral("把新的监控需求交给后台 Claude setup agent："
+                       "它会按你填写的允许/禁止边界设置监控、登记到 Monitor Hub，"
+                       "办理过程会出现在“新任务办理”项目里。"));
+    side_layout->addWidget(new_monitor_);
+    connect(new_monitor_, &QPushButton::clicked, this, [this] {
+        open_new_monitor_dialog();
     });
 
     auto* claude_card = new QFrame(sidebar);
@@ -1462,6 +1477,194 @@ void QtMainWindow::render_task_detail() {
     open_result_->setEnabled(meta && local_exists(s(meta->if_contains("result"))));
     copy_command_->setEnabled(meta && !s(meta->if_contains("command")).empty());
     refresh_quick_actions();
+}
+
+void QtMainWindow::open_new_monitor_dialog() {
+    auto* dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(QStringLiteral("新建监控任务"));
+    dialog->resize(880, 720);
+
+    auto* layout = new QVBoxLayout(dialog);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(10);
+
+    auto* title = new QLabel(QStringLiteral("新建监控任务"), dialog);
+    title->setObjectName(QStringLiteral("pageTitle"));
+    layout->addWidget(title);
+
+    auto* help = new QLabel(
+        QStringLiteral("至少填写“项目名称”和“项目目录”。后台 Claude 会先检查项目现状，"
+                       "避免重复建立监控；允许/禁止操作会作为权限边界写入 setup prompt。"),
+        dialog);
+    help->setWordWrap(true);
+    help->setObjectName(QStringLiteral("mutedText"));
+    layout->addWidget(help);
+
+    auto* editor = new QTextEdit(dialog);
+    editor->setPlainText(q(setup_request_template()));
+    editor->setAcceptRichText(false);
+    layout->addWidget(editor, 1);
+
+    auto* buttons = new QHBoxLayout();
+    auto* example = new QPushButton(QStringLiteral("填入示例"), dialog);
+    auto* copy = new QPushButton(QStringLiteral("复制"), dialog);
+    auto* cancel = new QPushButton(QStringLiteral("取消"), dialog);
+    auto* submit =
+        new QPushButton(QStringLiteral("交给后台 Claude 办理"), dialog);
+    submit->setDefault(true);
+    buttons->addWidget(example);
+    buttons->addWidget(copy);
+    buttons->addStretch();
+    buttons->addWidget(cancel);
+    buttons->addWidget(submit);
+    layout->addLayout(buttons);
+
+    connect(example, &QPushButton::clicked, dialog, [editor] {
+        editor->setPlainText(q(setup_request_example()));
+    });
+    connect(copy, &QPushButton::clicked, dialog, [editor] {
+        QApplication::clipboard()->setText(editor->toPlainText());
+    });
+    connect(cancel, &QPushButton::clicked, dialog, &QDialog::reject);
+
+    connect(submit, &QPushButton::clicked, dialog,
+            [this, dialog, editor, submit] {
+        const auto body_q = editor->toPlainText().trimmed();
+        const auto body =
+            body_q.toUtf8().toStdString();
+        const auto fields = parse_setup_request_fields(body);
+        if (!fields) {
+            QMessageBox::warning(
+                dialog,
+                QStringLiteral("还差一点"),
+                QStringLiteral("至少填写“项目名称”和“项目目录（本机路径）”。"));
+            return;
+        }
+
+        const auto runtime = setup_agent_runtime_from_env();
+        const auto runtime_errors = validate_setup_agent_runtime(runtime);
+        if (!runtime_errors.empty()) {
+            QStringList lines;
+            for (const auto& error : runtime_errors)
+                lines << QStringLiteral("• ") + q(error);
+            QMessageBox::critical(
+                dialog,
+                QStringLiteral("后台 Agent 环境未就绪"),
+                QStringLiteral("请求还没有提交。请先修好下面的本地依赖：\n\n") +
+                    lines.join(QStringLiteral("\n")));
+            return;
+        }
+
+        const auto answer = QMessageBox::question(
+            dialog,
+            QStringLiteral("交给后台 Claude"),
+            QStringLiteral(
+                "后台 Claude 会按这份说明设置监控、登记到总台并启动监控。\n\n"
+                "它可以执行你在“允许监控自动做的操作”中授权的动作；"
+                "超出范围的决定必须升级给你/主 Agent。\n\n确定提交吗？"),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (answer != QMessageBox::Yes) return;
+
+        SetupRequestLaunch launch;
+        try {
+            launch = prepare_setup_request(
+                paths_,
+                body,
+                fs::path(fields->workdir));
+        } catch (const std::exception& error) {
+            QMessageBox::critical(
+                dialog,
+                QStringLiteral("提交失败"),
+                q(error.what()));
+            return;
+        }
+
+        submit->setEnabled(false);
+        if (new_monitor_) new_monitor_->setEnabled(false);
+        if (quick_feedback_)
+            quick_feedback_->setText(QStringLiteral("正在提交新监控任务…"));
+
+        auto* process = new QProcess(this);
+        process->setProcessChannelMode(QProcess::MergedChannels);
+        process->setProgram(q(launch.runtime.powershell.string()));
+        QStringList args;
+        for (const auto& arg : launch.arguments) args << q(arg);
+        process->setArguments(args);
+
+        const auto job_name = q(launch.job_name);
+        const auto request_file = q(launch.request_file.string());
+
+        connect(
+            process,
+            &QProcess::errorOccurred,
+            this,
+            [this, process, request_file](QProcess::ProcessError error) {
+                if (error != QProcess::FailedToStart) return;
+                if (new_monitor_) new_monitor_->setEnabled(true);
+                if (quick_feedback_)
+                    quick_feedback_->setText(
+                        QStringLiteral("后台 Agent 启动失败"));
+                QMessageBox::critical(
+                    this,
+                    QStringLiteral("后台 Agent 启动失败"),
+                    QStringLiteral(
+                        "请求文件已保留，但 PowerShell/detach helper 没有启动。\n\n"
+                        "请求：%1\n\n%2")
+                        .arg(request_file)
+                        .arg(process->errorString()));
+                process->deleteLater();
+            });
+
+        connect(
+            process,
+            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this,
+            [this, process, job_name, request_file](
+                int exit_code,
+                QProcess::ExitStatus exit_status) {
+                const auto output =
+                    QString::fromUtf8(process->readAll()).trimmed();
+                if (new_monitor_) new_monitor_->setEnabled(true);
+
+                if (exit_status != QProcess::NormalExit || exit_code != 0) {
+                    if (quick_feedback_)
+                        quick_feedback_->setText(
+                            QStringLiteral("新监控任务提交失败"));
+                    QMessageBox::critical(
+                        this,
+                        QStringLiteral("提交失败"),
+                        QStringLiteral(
+                            "请求文件已保留，但 detached setup agent 没有正常启动。\n\n"
+                            "请求：%1\n\n%2")
+                            .arg(request_file)
+                            .arg(output.right(1600)));
+                    process->deleteLater();
+                    return;
+                }
+
+                if (quick_feedback_)
+                    quick_feedback_->setText(
+                        QStringLiteral("已提交：") + job_name);
+                refresh();
+                select_project("hub-setup");
+                if (tabs_) tabs_->setCurrentIndex(1);
+                QMessageBox::information(
+                    this,
+                    QStringLiteral("已提交"),
+                    QStringLiteral(
+                        "已交给后台 Claude（%1）。\n"
+                        "“新任务办理”会显示办理进度和需要你决定的事项。")
+                        .arg(job_name));
+                process->deleteLater();
+            });
+
+        process->start();
+        dialog->accept();
+    });
+
+    dialog->open();
 }
 
 void QtMainWindow::copy_claude_statusline_setup() {
