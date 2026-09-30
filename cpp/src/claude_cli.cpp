@@ -39,16 +39,16 @@ std::filesystem::path env_path(const char* name) {
     return value && *value ? std::filesystem::path(value) : std::filesystem::path{};
 }
 
-bool exists(const std::filesystem::path& path) {
+bool path_exists(const std::filesystem::path& path) {
     if (path.empty()) return false;
     std::error_code ec;
-    return std::filesystem::exists(path, ec) && !ec;
+    return std::filesystem::path_exists(path, ec) && !ec;
 }
 
 std::filesystem::path first_existing(
     const std::vector<std::filesystem::path>& candidates) {
     for (const auto& candidate : candidates)
-        if (exists(candidate)) return candidate;
+        if (path_exists(candidate)) return candidate;
     return {};
 }
 
@@ -175,7 +175,7 @@ bool read_latest_stream_snapshot(const RuntimePaths& paths,
         if (ec) break;
         if (!entry.is_directory(ec) || ec) continue;
         const auto log = entry.path() / "output.log";
-        if (!exists(log)) continue;
+        if (!path_exists(log)) continue;
         logs.emplace_back(mtime_seconds(log).value_or(0.0), log);
     }
 
