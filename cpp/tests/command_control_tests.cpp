@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -13,6 +14,15 @@
 
 namespace fs = std::filesystem;
 namespace json = boost::json;
+
+#define CHECK(expr) \
+    do { \
+        if (!(expr)) { \
+            std::cerr << "CHECK failed: " #expr \
+                      << " at " << __FILE__ << ":" << __LINE__ << "\\n"; \
+            std::exit(1); \
+        } \
+    } while (false)
 
 namespace {
 
@@ -104,7 +114,7 @@ std::string policy_json(const std::string& project_id) {
 
 json::object read_json_object(const fs::path& path) {
     const auto value = monitor_hub::read_json(path);
-    assert(value && value->is_object());
+    CHECK(value && value->is_object());
     return value->as_object();
 }
 
@@ -138,45 +148,45 @@ int main() {
             "rm -rf / should never execute";
 
         const auto submit = submit_command(paths, l1);
-        assert(submit.accepted);
-        assert(!submit.duplicate);
+        CHECK(submit.accepted);
+        CHECK(!submit.duplicate);
 
         const auto duplicate = submit_command(paths, l1);
-        assert(!duplicate.accepted);
-        assert(duplicate.duplicate);
+        CHECK(!duplicate.accepted);
+        CHECK(duplicate.duplicate);
 
         const auto dispatched =
             dispatch_pending_commands(paths);
-        assert(dispatched.queued_l1 == 1);
-        assert(dispatched.queued_l2 == 0);
-        assert(dispatched.rejected == 0);
-        assert(dispatched.receipts.size() == 1);
-        assert(dispatched.receipts[0].state == "queued_l1");
-        assert(dispatched.receipts[0].policy_id == "demo-policy-v1");
-        assert(dispatched.receipts[0].action_id ==
+        CHECK(dispatched.queued_l1 == 1);
+        CHECK(dispatched.queued_l2 == 0);
+        CHECK(dispatched.rejected == 0);
+        CHECK(dispatched.receipts.size() == 1);
+        CHECK(dispatched.receipts[0].state == "queued_l1");
+        CHECK(dispatched.receipts[0].policy_id == "demo-policy-v1");
+        CHECK(dispatched.receipts[0].action_id ==
                "restart_same_parameters");
-        assert(dispatched.receipts[0].dispatch_kind ==
+        CHECK(dispatched.receipts[0].dispatch_kind ==
                "deterministic");
-        assert(fs::exists(dispatched.receipts[0].dispatch_path));
+        CHECK(fs::exists(dispatched.receipts[0].dispatch_path));
 
         const auto dispatch =
             read_json_object(dispatched.receipts[0].dispatch_path);
-        assert(dispatch.at("handler").as_string() ==
+        CHECK(dispatch.at("handler").as_string() ==
                "restart_same_parameters");
-        assert(dispatch.at("dispatch_kind").as_string() ==
+        CHECK(dispatch.at("dispatch_kind").as_string() ==
                "deterministic");
         const auto constraints =
             dispatch.at("constraints").as_array();
-        assert(constraints.size() == 2);
+        CHECK(constraints.size() == 2);
 
         const auto receipts_before =
             read_text(paths.hub_data /
                       "commands" / "receipts.jsonl");
         const auto repeated =
             dispatch_pending_commands(paths);
-        assert(repeated.receipts.empty());
-        assert(repeated.already_processed == 1);
-        assert(
+        CHECK(repeated.receipts.empty());
+        CHECK(repeated.already_processed == 1);
+        CHECK(
             receipts_before ==
             read_text(paths.hub_data /
                       "commands" / "receipts.jsonl"));
@@ -198,17 +208,17 @@ int main() {
             "demo",
             "troubleshoot_known_failure",
             "policies/demo.json");
-        assert(submit_command(paths, l2).accepted);
+        CHECK(submit_command(paths, l2).accepted);
 
         const auto dispatched =
             dispatch_pending_commands(paths);
-        assert(dispatched.queued_l2 == 1);
-        assert(dispatched.receipts.size() == 1);
+        CHECK(dispatched.queued_l2 == 1);
+        CHECK(dispatched.receipts.size() == 1);
         const auto dispatch =
             read_json_object(dispatched.receipts[0].dispatch_path);
-        assert(dispatch.at("agent_profile").as_string() ==
+        CHECK(dispatch.at("agent_profile").as_string() ==
                "bounded-troubleshooter");
-        assert(dispatch.at("dispatch_kind").as_string() ==
+        CHECK(dispatch.at("dispatch_kind").as_string() ==
                "child_agent");
     }
 
@@ -221,26 +231,26 @@ int main() {
             "project.method_change.requested",
             "L3",
             "demo");
-        assert(submit_command(paths, l3).accepted);
+        CHECK(submit_command(paths, l3).accepted);
 
         const auto dispatched =
             dispatch_pending_commands(paths);
-        assert(dispatched.escalated_l3 == 1);
-        assert(dispatched.queued_l1 == 0);
-        assert(dispatched.queued_l2 == 0);
-        assert(dispatched.receipts[0].state == "needs_user");
+        CHECK(dispatched.escalated_l3 == 1);
+        CHECK(dispatched.queued_l1 == 0);
+        CHECK(dispatched.queued_l2 == 0);
+        CHECK(dispatched.receipts[0].state == "needs_user");
 
         const auto projection =
             load_project_event_projection(paths, "demo", 100);
-        assert(projection.events.size() == 2);
-        assert(std::any_of(
+        CHECK(projection.events.size() == 2);
+        CHECK(std::any_of(
             projection.events.begin(),
             projection.events.end(),
             [](const EventRecord& event) {
                 return event.event_type ==
                        "issue.user_action_required";
             }));
-        assert(std::any_of(
+        CHECK(std::any_of(
             projection.events.begin(),
             projection.events.end(),
             [](const EventRecord& event) {
@@ -257,9 +267,9 @@ int main() {
                 return item.notification_id ==
                        "ntf:cmd:cmd-l3";
             });
-        assert(notification != outbox.items.end());
-        assert(notification->reason == "decision_required");
-        assert(notification->state == "pending");
+        CHECK(notification != outbox.items.end());
+        CHECK(notification->reason == "decision_required");
+        CHECK(notification->state == "pending");
     }
 
     // A policy cannot authorize a different authority or command type.
@@ -276,12 +286,12 @@ int main() {
             "demo",
             "restart_same_parameters",
             "policies/demo");
-        assert(submit_command(paths, mismatch).accepted);
+        CHECK(submit_command(paths, mismatch).accepted);
         const auto result =
             dispatch_pending_commands(paths);
-        assert(result.rejected == 1);
-        assert(result.receipts[0].state == "rejected");
-        assert(result.receipts[0].reason.find(
+        CHECK(result.rejected == 1);
+        CHECK(result.receipts[0].state == "rejected");
+        CHECK(result.receipts[0].reason.find(
                    "authority") != std::string::npos);
     }
 
@@ -295,11 +305,11 @@ int main() {
             "demo",
             "restart_same_parameters",
             "../secret-policy");
-        assert(submit_command(paths, traversal).accepted);
+        CHECK(submit_command(paths, traversal).accepted);
         const auto result =
             dispatch_pending_commands(paths);
-        assert(result.rejected == 1);
-        assert(result.receipts[0].reason.find(
+        CHECK(result.rejected == 1);
+        CHECK(result.receipts[0].reason.find(
                    "HUB_DATA/policies") != std::string::npos);
 
         auto bad_project = command(
@@ -311,8 +321,8 @@ int main() {
             "policies/demo");
         const auto bad_submit =
             submit_command(paths, bad_project);
-        assert(!bad_submit.accepted);
-        assert(bad_submit.reason.find(
+        CHECK(!bad_submit.accepted);
+        CHECK(bad_submit.reason.find(
                    "filesystem-safe") != std::string::npos);
     }
 
@@ -348,8 +358,8 @@ int main() {
                 paths,
                 "policies/bad",
                 error);
-        assert(!policy);
-        assert(error.find("duplicate") != std::string::npos);
+        CHECK(!policy);
+        CHECK(error.find("duplicate") != std::string::npos);
     }
 
     // One bad inbox line cannot poison valid command processing.
@@ -360,8 +370,8 @@ int main() {
             "{bad json}\n");
         const auto result =
             dispatch_pending_commands(paths);
-        assert(result.malformed_commands == 1);
-        assert(result.receipts.empty());
+        CHECK(result.malformed_commands == 1);
+        CHECK(result.receipts.empty());
     }
 
     fs::remove_all(root);
