@@ -125,6 +125,16 @@ QString desktop_settings_storage() {
     return settings.fileName();
 }
 
+QString desktop_orchestrator_program() {
+#ifdef Q_OS_WIN
+    constexpr auto kName = "monitor_hub_orchestrator.exe";
+#else
+    constexpr auto kName = "monitor_hub_orchestrator";
+#endif
+    return QDir(QCoreApplication::applicationDirPath())
+        .filePath(QString::fromLatin1(kName));
+}
+
 QString desktop_diagnostics_text() {
     const auto settings = load_desktop_settings();
 
@@ -135,6 +145,12 @@ QString desktop_diagnostics_text() {
           << QStringLiteral("executable=%1").arg(
                  QDir::toNativeSeparators(QCoreApplication::applicationFilePath()))
           << QStringLiteral("settings=%1").arg(desktop_settings_storage())
+          << QStringLiteral("orchestrator=%1").arg(
+                 QDir::toNativeSeparators(desktop_orchestrator_program()))
+          << QStringLiteral("orchestrator_exists=%1").arg(
+                 QFileInfo::exists(desktop_orchestrator_program())
+                     ? QStringLiteral("true")
+                     : QStringLiteral("false"))
           << QStringLiteral("development_checkout=%1").arg(
                  running_from_development_checkout() ? QStringLiteral("true")
                                                      : QStringLiteral("false"))
