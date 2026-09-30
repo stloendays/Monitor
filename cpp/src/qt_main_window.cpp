@@ -3,16 +3,21 @@
 #include "monitor_hub/windows_probe.hpp"
 
 #include <QApplication>
+#include <QBrush>
 #include <QClipboard>
+#include <QColor>
 #include <QDesktopServices>
 #include <QFontDatabase>
 #include <QFrame>
 #include <QHeaderView>
 #include <QLabel>
 #include <QListWidget>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTableWidget>
+#include <QStyle>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTextEdit>
 #include <QTimer>
@@ -91,8 +96,53 @@ void open_local(const std::string& path) {
     QDesktopServices::openUrl(QUrl::fromLocalFile(q(path)));
 }
 
+QColor health_color(const std::string& health) {
+    if (health == "attention" || health == "stale") return QColor(QStringLiteral("#9A641F"));
+    if (health == "working") return QColor(QStringLiteral("#4A6F9C"));
+    if (health == "done") return QColor(QStringLiteral("#58705D"));
+    if (health == "error") return QColor(QStringLiteral("#A4483F"));
+    if (health == "paused") return QColor(QStringLiteral("#77736C"));
+    return QColor(QStringLiteral("#2E6B47"));
+}
+
+QColor agent_state_color(const std::string& state) {
+    if (state == "running") return QColor(QStringLiteral("#4A6F9C"));
+    if (state == "ok") return QColor(QStringLiteral("#58705D"));
+    if (state == "failed") return QColor(QStringLiteral("#A4483F"));
+    return QColor(QStringLiteral("#77736C"));
+}
+
+void emphasize_item(QTableWidgetItem* item, const QColor& color) {
+    if (!item) return;
+    item->setForeground(QBrush(color));
+    auto font = item->font();
+    font.setWeight(QFont::DemiBold);
+    item->setFont(font);
+}
+
+void configure_table(QTableWidget* table) {
+    if (!table) return;
+    table->setShowGrid(false);
+    table->setAlternatingRowColors(false);
+    table->setFocusPolicy(Qt::NoFocus);
+    table->setWordWrap(false);
+    table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    table->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    table->verticalHeader()->setDefaultSectionSize(42);
+}
+
+void set_health_badge(QLabel* label, const std::string& health) {
+    if (!label) return;
+    label->setProperty("health", q(health));
+    label->setText(health_text(health));
+    label->style()->unpolish(label);
+    label->style()->polish(label);
+    label->update();
+}
+
 QPushButton* info_button(const QString& tooltip, QWidget* parent) {
     auto* button = new QPushButton(QStringLiteral("ⓘ"), parent);
+    button->setObjectName(QStringLiteral("infoButton"));
     button->setFlat(true);
     button->setFocusPolicy(Qt::NoFocus);
     button->setToolTip(tooltip);
@@ -117,18 +167,42 @@ QtMainWindow::QtMainWindow(RuntimePaths paths, QWidget* parent)
 
 void QtMainWindow::build_ui() {
     auto* central = new QWidget(this);
+    central->setObjectName(QStringLiteral("appRoot"));
     auto* root = new QHBoxLayout(central);
-    root->setContentsMargins(10, 10, 10, 10);
-    root->setSpacing(10);
+    root->setContentsMargins(14, 14, 14, 14);
+    root->setSpacing(14);
 
     auto* sidebar = new QWidget(central);
-    sidebar->setMinimumWidth(280);
-    sidebar->setMaximumWidth(360);
+    sidebar->setObjectName(QStringLiteral("sidebar"));
+    sidebar->setMinimumWidth(270);
+    sidebar->setMaximumWidth(330);
     auto* side_layout = new QVBoxLayout(sidebar);
-    side_layout->setContentsMargins(0, 0, 0, 0);
+    side_layout->setContentsMargins(14, 14, 14, 14);
+    side_layout->setSpacing(10);
+
+    auto* brand_row = new QHBoxLayout();
+    brand_row->setSpacing(10);
+    auto* brand_icon = new QLabel(sidebar);
+    const QPixmap app_icon(QStringLiteral(":/monitor_hub/icons/monitor_hub.png"));
+    brand_icon->setPixmap(app_icon.scaled(
+        30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    brand_icon->setFixedSize(32, 32);
+    brand_row->addWidget(brand_icon);
+
+    auto* brand_text = new QVBoxLayout();
+    brand_text->setSpacing(0);
+    auto* brand_title = new QLabel(QStringLiteral("Monitor Hub"), sidebar);
+    brand_title->setObjectName(QStringLiteral("brandTitle"));
+    auto* brand_subtitle = new QLabel(QStringLiteral("Agent Operations"), sidebar);
+    brand_subtitle->setObjectName(QStringLiteral("brandSubtitle"));
+    brand_text->addWidget(brand_title);
+    brand_text->addWidget(brand_subtitle);
+    brand_row->addLayout(brand_text, 1);
+    side_layout->addLayout(brand_row);
 
     auto* side_head = new QHBoxLayout();
     auto* projects_label = new QLabel(QStringLiteral("项目"), sidebar);
+    projects_label->setObjectName(QStringLiteral("sectionLabel"));
     QFont side_font = projects_label->font();
     side_font.setBold(true);
     side_font.setPointSize(side_font.pointSize() + 2);
@@ -141,7 +215,10 @@ void QtMainWindow::build_ui() {
     side_layout->addLayout(side_head);
 
     project_list_ = new QListWidget(sidebar);
-    project_list_->setAlternatingRowColors(true);
+    project_list_->setObjectName(QStringLiteral("projectList"));
+    project_list_->setAlternatingRowColors(false);
+    project_list_->setSpacing(2);
+    project_list_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     side_layout->addWidget(project_list_, 1);
     connect(project_list_, &QListWidget::currentRowChanged, this, [this](int row) {
         if (row < 0) return;
@@ -151,24 +228,31 @@ void QtMainWindow::build_ui() {
     });
 
     auto* main = new QWidget(central);
+    main->setObjectName(QStringLiteral("mainPane"));
     auto* main_layout = new QVBoxLayout(main);
     main_layout->setContentsMargins(0, 0, 0, 0);
+    main_layout->setSpacing(12);
 
     auto* header = new QWidget(main);
+    header->setObjectName(QStringLiteral("contextHeader"));
     auto* header_layout = new QVBoxLayout(header);
-    header_layout->setContentsMargins(10, 6, 10, 6);
+    header_layout->setContentsMargins(18, 14, 18, 14);
+    header_layout->setSpacing(8);
 
     auto* title_line = new QHBoxLayout();
     title_ = new QLabel(header);
+    title_->setObjectName(QStringLiteral("pageTitle"));
     QFont title_font = title_->font();
     title_font.setBold(true);
     title_font.setPointSize(title_font.pointSize() + 5);
     title_->setFont(title_font);
     title_line->addWidget(title_);
     area_ = new QLabel(header);
+    area_->setObjectName(QStringLiteral("pageMeta"));
     title_line->addWidget(area_);
     title_line->addStretch();
-    auto* refresh_button = new QPushButton(QStringLiteral("立即刷新"), header);
+    auto* refresh_button = new QPushButton(QStringLiteral("刷新"), header);
+    refresh_button->setProperty("role", QStringLiteral("secondary"));
     refresh_button->setToolTip(QStringLiteral("重新读取 Task Scheduler、WMI 进程和状态文件；不会启动、停止或修改计算任务。"));
     title_line->addWidget(refresh_button);
     connect(refresh_button, &QPushButton::clicked, this, [this] { this->refresh(); });
@@ -176,22 +260,28 @@ void QtMainWindow::build_ui() {
 
     auto* state_line = new QHBoxLayout();
     health_ = new QLabel(header);
+    health_->setObjectName(QStringLiteral("healthBadge"));
     QFont health_font = health_->font();
     health_font.setBold(true);
     health_font.setPointSize(health_font.pointSize() + 2);
     health_->setFont(health_font);
     state_line->addWidget(health_);
     headline_ = new QLabel(header);
+    headline_->setObjectName(QStringLiteral("headline"));
     headline_->setWordWrap(true);
     state_line->addWidget(headline_, 1);
     header_layout->addLayout(state_line);
 
     runner_ = new QLabel(header);
+    runner_->setObjectName(QStringLiteral("mutedText"));
     runner_->setWordWrap(true);
     header_layout->addWidget(runner_);
     main_layout->addWidget(header);
 
     tabs_ = new QTabWidget(main);
+    tabs_->setObjectName(QStringLiteral("mainTabs"));
+    tabs_->setDocumentMode(true);
+    tabs_->tabBar()->setExpanding(false);
 
     // Cross-project operations overview.
     auto* overview_tab = new QWidget(tabs_);
@@ -200,13 +290,15 @@ void QtMainWindow::build_ui() {
     overview_layout->setSpacing(8);
 
     auto* overview_head = new QHBoxLayout();
-    auto* overview_title = new QLabel(QStringLiteral("总览 · 控制塔"), overview_tab);
+    auto* overview_title = new QLabel(QStringLiteral("总览"), overview_tab);
+    overview_title->setObjectName(QStringLiteral("pageSectionTitle"));
     QFont overview_title_font = overview_title->font();
     overview_title_font.setBold(true);
     overview_title_font.setPointSize(overview_title_font.pointSize() + 2);
     overview_title->setFont(overview_title_font);
     overview_head->addWidget(overview_title);
     overview_counts_ = new QLabel(overview_tab);
+    overview_counts_->setObjectName(QStringLiteral("summaryText"));
     overview_counts_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     overview_head->addWidget(overview_counts_, 1);
     overview_head->addWidget(info_button(
@@ -216,12 +308,14 @@ void QtMainWindow::build_ui() {
     overview_layout->addLayout(overview_head);
 
     auto* overview_projects_label = new QLabel(QStringLiteral("项目状态"), overview_tab);
+    overview_projects_label->setObjectName(QStringLiteral("sectionLabel"));
     QFont overview_section_font = overview_projects_label->font();
     overview_section_font.setBold(true);
     overview_projects_label->setFont(overview_section_font);
     overview_layout->addWidget(overview_projects_label);
 
     overview_projects_ = new QTableWidget(overview_tab);
+    configure_table(overview_projects_);
     overview_projects_->setColumnCount(4);
     overview_projects_->setHorizontalHeaderLabels({
         QStringLiteral("项目"),
@@ -238,6 +332,7 @@ void QtMainWindow::build_ui() {
 
     auto* overview_attention_head = new QHBoxLayout();
     auto* overview_attention_label = new QLabel(QStringLiteral("需要处理"), overview_tab);
+    overview_attention_label->setObjectName(QStringLiteral("sectionLabel"));
     overview_attention_label->setFont(overview_section_font);
     overview_attention_head->addWidget(overview_attention_label);
     overview_attention_head->addStretch();
@@ -248,6 +343,7 @@ void QtMainWindow::build_ui() {
     overview_layout->addLayout(overview_attention_head);
 
     overview_attention_ = new QTableWidget(overview_tab);
+    configure_table(overview_attention_);
     overview_attention_->setColumnCount(3);
     overview_attention_->setHorizontalHeaderLabels({
         QStringLiteral("类型"),
@@ -263,6 +359,7 @@ void QtMainWindow::build_ui() {
 
     auto* overview_agent_head = new QHBoxLayout();
     auto* overview_agent_label = new QLabel(QStringLiteral("最近 Agent Activity"), overview_tab);
+    overview_agent_label->setObjectName(QStringLiteral("sectionLabel"));
     overview_agent_label->setFont(overview_section_font);
     overview_agent_head->addWidget(overview_agent_label);
     overview_agent_head->addStretch();
@@ -273,6 +370,7 @@ void QtMainWindow::build_ui() {
     overview_layout->addLayout(overview_agent_head);
 
     overview_agents_ = new QTableWidget(overview_tab);
+    configure_table(overview_agents_);
     overview_agents_->setColumnCount(4);
     overview_agents_->setHorizontalHeaderLabels({
         QStringLiteral("时间"),
@@ -320,6 +418,7 @@ void QtMainWindow::build_ui() {
 
     auto* progress_head = new QHBoxLayout();
     auto* progress_label = new QLabel(QStringLiteral("任务进度"), progress_tab);
+    progress_label->setObjectName(QStringLiteral("sectionLabel"));
     QFont section_font = progress_label->font();
     section_font.setBold(true);
     progress_label->setFont(section_font);
@@ -335,6 +434,7 @@ void QtMainWindow::build_ui() {
     auto* progress_left_layout = new QVBoxLayout(progress_left);
     progress_left_layout->setContentsMargins(0, 0, 0, 0);
     progress_ = new QTableWidget(progress_left);
+    configure_table(progress_);
     progress_->setSelectionBehavior(QAbstractItemView::SelectRows);
     progress_->setSelectionMode(QAbstractItemView::SingleSelection);
     progress_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -342,23 +442,30 @@ void QtMainWindow::build_ui() {
     progress_->horizontalHeader()->setStretchLastSection(true);
     progress_left_layout->addWidget(progress_, 1);
     notes_ = new QTextEdit(progress_left);
+    notes_->setObjectName(QStringLiteral("notesPanel"));
     notes_->setReadOnly(true);
     notes_->setMaximumHeight(150);
     progress_left_layout->addWidget(notes_);
 
     auto* detail = new QFrame(split);
-    detail->setFrameShape(QFrame::StyledPanel);
+    detail->setObjectName(QStringLiteral("detailCard"));
+    detail->setFrameShape(QFrame::NoFrame);
     detail->setMinimumWidth(360);
     auto* detail_layout = new QVBoxLayout(detail);
+    detail_layout->setContentsMargins(14, 14, 14, 14);
+    detail_layout->setSpacing(10);
     task_title_ = new QLabel(QStringLiteral("未选择任务"), detail);
+    task_title_->setObjectName(QStringLiteral("cardTitle"));
     QFont task_font = task_title_->font();
     task_font.setBold(true);
     task_font.setPointSize(task_font.pointSize() + 2);
     task_title_->setFont(task_font);
     detail_layout->addWidget(task_title_);
     task_sub_ = new QLabel(detail);
+    task_sub_->setObjectName(QStringLiteral("mutedText"));
     detail_layout->addWidget(task_sub_);
     task_paths_ = new QLabel(detail);
+    task_paths_->setObjectName(QStringLiteral("codeBlock"));
     task_paths_->setWordWrap(true);
     task_paths_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     QFont mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
@@ -367,9 +474,13 @@ void QtMainWindow::build_ui() {
 
     auto* task_buttons = new QHBoxLayout();
     open_task_ = new QPushButton(QStringLiteral("打开任务"), detail);
+    open_task_->setProperty("role", QStringLiteral("primary"));
     open_log_ = new QPushButton(QStringLiteral("日志"), detail);
+    open_log_->setProperty("role", QStringLiteral("secondary"));
     open_result_ = new QPushButton(QStringLiteral("结果"), detail);
+    open_result_->setProperty("role", QStringLiteral("secondary"));
     copy_command_ = new QPushButton(QStringLiteral("复制命令"), detail);
+    copy_command_->setProperty("role", QStringLiteral("secondary"));
     open_task_->setToolTip(QStringLiteral("打开 open_path / path / workdir；没有目录时再尝试日志或结果。"));
     open_log_->setToolTip(QStringLiteral("打开当前任务登记的主要日志文件。"));
     open_result_->setToolTip(QStringLiteral("打开当前任务登记的结果文件。"));
@@ -378,9 +489,11 @@ void QtMainWindow::build_ui() {
     detail_layout->addLayout(task_buttons);
 
     auto* params_label = new QLabel(QStringLiteral("参数"), detail);
+    params_label->setObjectName(QStringLiteral("sectionLabel"));
     params_label->setFont(section_font);
     detail_layout->addWidget(params_label);
     params_ = new QTableWidget(detail);
+    configure_table(params_);
     params_->setColumnCount(2);
     params_->setHorizontalHeaderLabels({QStringLiteral("参数"), QStringLiteral("值")});
     params_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -405,12 +518,15 @@ void QtMainWindow::build_ui() {
     auto* takeover_tab = new QWidget(tabs_);
     auto* takeover_layout = new QVBoxLayout(takeover_tab);
     auto* takeover_head = new QHBoxLayout();
-    takeover_head->addWidget(new QLabel(QStringLiteral("后台处理记录"), takeover_tab));
+    auto* takeover_label = new QLabel(QStringLiteral("后台处理记录"), takeover_tab);
+    takeover_label->setObjectName(QStringLiteral("sectionLabel"));
+    takeover_head->addWidget(takeover_label);
     takeover_head->addStretch();
     takeover_head->addWidget(info_button(
         QStringLiteral("这里显示 monitor 启动的 Claude takeover 历史。当前 Qt 阶段只读，不在这里启动或修改后台作业。"), takeover_tab));
     takeover_layout->addLayout(takeover_head);
     takeovers_ = new QTableWidget(takeover_tab);
+    configure_table(takeovers_);
     takeovers_->setColumnCount(3);
     takeovers_->setHorizontalHeaderLabels({QStringLiteral("时间"), QStringLiteral("结果"), QStringLiteral("摘要")});
     takeovers_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -427,11 +543,14 @@ void QtMainWindow::build_ui() {
     auto* result_tab = new QWidget(tabs_);
     auto* result_layout = new QVBoxLayout(result_tab);
     auto* result_head = new QHBoxLayout();
-    result_head->addWidget(new QLabel(QStringLiteral("最终结果"), result_tab));
+    auto* result_label = new QLabel(QStringLiteral("最终结果"), result_tab);
+    result_label->setObjectName(QStringLiteral("sectionLabel"));
+    result_head->addWidget(result_label);
     result_head->addStretch();
     result_head->addWidget(info_button(QStringLiteral("双击已生成的结果文件可用系统默认程序打开。"), result_tab));
     result_layout->addLayout(result_head);
     results_ = new QTableWidget(result_tab);
+    configure_table(results_);
     results_->setColumnCount(2);
     results_->setHorizontalHeaderLabels({QStringLiteral("文件"), QStringLiteral("状态")});
     results_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -443,6 +562,9 @@ void QtMainWindow::build_ui() {
         if (item) open_local(item->data(Qt::UserRole).toString().toUtf8().toStdString());
     });
     tabs_->addTab(result_tab, QStringLiteral("最终结果"));
+    connect(tabs_, &QTabWidget::currentChanged, this, [this](int) {
+        render_context_header();
+    });
 
     main_layout->addWidget(tabs_, 1);
     root->addWidget(sidebar);
@@ -465,6 +587,7 @@ void QtMainWindow::refresh() {
     render_overview();
     render_sidebar();
     render_project();
+    render_context_header();
 }
 
 std::vector<QtDesktopProjectState> QtMainWindow::desktop_project_states() const {
@@ -487,6 +610,57 @@ std::vector<QtDesktopProjectState> QtMainWindow::desktop_project_states() const 
     }
 
     return out;
+}
+
+void QtMainWindow::render_context_header() {
+    if (tabs_ && tabs_->currentIndex() == 0) {
+        const auto model = build_overview_model(projects_, snapshots_, 24);
+        const int needs_action =
+            model.attention_projects + model.error_projects + model.stale_projects;
+
+        title_->setText(QStringLiteral("Monitor Hub"));
+        area_->setText(QStringLiteral("Agent Operations"));
+
+        std::string aggregate_health = "ok";
+        if (needs_action > 0) aggregate_health = "attention";
+        else if (model.working_projects > 0) aggregate_health = "working";
+        else if (model.total_projects > 0 &&
+                 model.done_projects == model.total_projects)
+            aggregate_health = "done";
+        set_health_badge(health_, aggregate_health);
+
+        headline_->setText(
+            QStringLiteral("%1 个项目 · %2 个需要处理 · %3 个后台处理中 · %4 个已完成")
+                .arg(model.total_projects)
+                .arg(needs_action)
+                .arg(model.working_projects)
+                .arg(model.done_projects));
+        runner_->setText(QStringLiteral("自动刷新间隔：60 秒"));
+        return;
+    }
+
+    const auto* project = current_project();
+    const auto* snap = current_snapshot();
+    if (!project || !snap) {
+        title_->setText(QStringLiteral("Monitor Hub"));
+        area_->setText(QStringLiteral("Agent Operations"));
+        set_health_badge(health_, "ok");
+        headline_->setText(QStringLiteral("暂无可显示的监控项目"));
+        runner_->clear();
+        return;
+    }
+
+    title_->setText(q(s(project->if_contains("name"))));
+    area_->setText(q(s(project->if_contains("area"))));
+    const auto health = s(snap->if_contains("health"), "ok");
+    set_health_badge(health_, health);
+
+    auto headline = s(snap->if_contains("problem"));
+    if (headline.empty()) headline = s(snap->if_contains("headline"));
+    headline_->setText(q(headline));
+
+    const auto* runner = object(snap->if_contains("runner"));
+    runner_->setText(runner ? q(s(runner->if_contains("text"))) : QString{});
 }
 
 void QtMainWindow::render_overview() {
@@ -522,7 +696,9 @@ void QtMainWindow::render_overview() {
         auto* name = new QTableWidgetItem(q(project.project_name));
         name->setData(Qt::UserRole, q(project.project_id));
         overview_projects_->setItem(row, 0, name);
-        overview_projects_->setItem(row, 1, new QTableWidgetItem(health_text(project.health)));
+        auto* status = new QTableWidgetItem(health_text(project.health));
+        emphasize_item(status, health_color(project.health));
+        overview_projects_->setItem(row, 1, status);
         overview_projects_->setItem(
             row,
             2,
@@ -539,7 +715,9 @@ void QtMainWindow::render_overview() {
     overview_attention_->setRowCount(static_cast<int>(model.attention.size()));
     for (int row = 0; row < static_cast<int>(model.attention.size()); ++row) {
         const auto& item = model.attention[static_cast<std::size_t>(row)];
-        overview_attention_->setItem(row, 0, new QTableWidgetItem(q(item.kind)));
+        auto* kind = new QTableWidgetItem(q(item.kind));
+        emphasize_item(kind, QColor(QStringLiteral("#9A641F")));
+        overview_attention_->setItem(row, 0, kind);
         auto* project = new QTableWidgetItem(q(item.project_name));
         project->setData(Qt::UserRole, q(item.project_id));
         overview_attention_->setItem(row, 1, project);
@@ -558,7 +736,9 @@ void QtMainWindow::render_overview() {
         auto* project = new QTableWidgetItem(q(item.project_name));
         project->setData(Qt::UserRole, q(item.project_id));
         overview_agents_->setItem(row, 1, project);
-        overview_agents_->setItem(row, 2, new QTableWidgetItem(agent_state_text(item.state)));
+        auto* state = new QTableWidgetItem(agent_state_text(item.state));
+        emphasize_item(state, agent_state_color(item.state));
+        overview_agents_->setItem(row, 2, state);
         auto* summary = new QTableWidgetItem(
             item.summary.empty() ? QStringLiteral("—") : q(item.summary));
         summary->setToolTip(
@@ -581,6 +761,7 @@ void QtMainWindow::render_sidebar() {
         const auto it = snapshots_.find(id);
         const auto health = it == snapshots_.end() ? std::string("error") : s(it->second.if_contains("health"), "ok");
         auto* item = new QListWidgetItem(health_prefix(health) + q(name), project_list_);
+        item->setSizeHint(QSize(0, 42));
         item->setData(Qt::UserRole, q(id));
         const auto area = s(project.if_contains("area"));
         if (!area.empty()) item->setToolTip(q(area));
@@ -607,6 +788,7 @@ void QtMainWindow::select_project(const std::string& id) {
     selected_project_ = id;
     selected_task_id_.clear();
     render_project();
+    render_context_header();
 }
 
 void QtMainWindow::render_project() {
@@ -627,7 +809,7 @@ void QtMainWindow::render_project() {
     title_->setText(q(s(project->if_contains("name"))));
     area_->setText(q(s(project->if_contains("area"))));
     const auto health = s(snap->if_contains("health"), "ok");
-    health_->setText(health_text(health));
+    set_health_badge(health_, health);
     auto headline = s(snap->if_contains("problem"));
     if (headline.empty()) headline = s(snap->if_contains("headline"));
     headline_->setText(q(headline));
@@ -677,6 +859,7 @@ void QtMainWindow::render_project() {
     render_task_detail();
     render_takeovers();
     render_results();
+    render_context_header();
 }
 
 const json::object* QtMainWindow::selected_task_meta() const {
@@ -778,7 +961,10 @@ void QtMainWindow::render_takeovers() {
         const auto* item = object(&(*items)[static_cast<std::size_t>(row)]);
         if (!item) continue;
         takeovers_->setItem(row, 0, new QTableWidgetItem(q(s(item->if_contains("label")))));
-        takeovers_->setItem(row, 1, new QTableWidgetItem(agent_state_text(s(item->if_contains("state")))));
+        const auto state_value = s(item->if_contains("state"));
+        auto* state = new QTableWidgetItem(agent_state_text(state_value));
+        emphasize_item(state, agent_state_color(state_value));
+        takeovers_->setItem(row, 1, state);
         auto* summary = new QTableWidgetItem(q(s(item->if_contains("summary"))));
         summary->setData(Qt::UserRole, q(s(item->if_contains("path"))));
         if (!s(item->if_contains("path")).empty())
