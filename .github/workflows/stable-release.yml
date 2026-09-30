@@ -133,7 +133,7 @@ jobs:
       - name: Upload release build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: monitor-hub-v${{ env.MONITOR_HUB_VERSION }}-windows
+          name: monitor-hub-stable-windows
           path: |
             dist/Monitor-Hub-*-win64-setup.exe
             dist/Monitor-Hub-*-win64-portable.zip
