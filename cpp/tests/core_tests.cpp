@@ -1,6 +1,7 @@
 #include "monitor_hub/core.hpp"
 #include "monitor_hub/event_store.hpp"
 #include "monitor_hub/overview.hpp"
+#include "monitor_hub/notification_outbox.hpp"
 #include "monitor_hub/setup_request.hpp"
 #include "monitor_hub/claude_cli.hpp"
 
@@ -358,6 +359,94 @@ int main() {
                setup_launch.arguments.begin(),
                setup_launch.arguments.end(),
                setup_launch.job_name) != setup_launch.arguments.end());
+
+    // Durable main-Agent outbox: missing notification.requested is bridged
+    // for L3/completion facts, explicit requests stay authoritative, repeated
+    // sync is idempotent, and acknowledgement survives process restart.
+    RuntimePaths outbox_paths = paths;
+    outbox_paths.hub_data = root / "outbox-test-hub";
+    const auto outbox_events = outbox_paths.hub_data / "events";
+
+    write_file(
+        outbox_events / "decision.jsonl",
+        R"({"schema_version":1,"event_id":"evt-decision","event_type":"issue.user_action_required","occurred_at":"2026-09-30T11:00:00+08:00","project_id":"decision","task_id":"d1","issue_id":"iss-decision","correlation_id":"corr-decision","source":{"kind":"monitor","id":"decision-monitor"},"severity":"warning","payload":{"summary":"需要主 Agent 选择恢复方案","authority":"L3"}})"
+        "\n");
+
+    auto notification_outbox = sync_notification_outbox(outbox_paths);
+    assert(notification_outbox.items.size() == 1);
+    assert(notification_outbox.pending_count() == 1);
+    assert(notification_outbox.items[0].notification_id ==
+           "ntf:auto:evt-decision");
+    assert(notification_outbox.items[0].reason == "decision_required");
+    assert(notification_outbox.items[0].target == "main_agent");
+    assert(notification_outbox.items[0].synthetic);
+
+    const auto first_outbox_bytes =
+        read_text(outbox_paths.hub_data / "outbox" / "notifications.jsonl");
+    notification_outbox = sync_notification_outbox(outbox_paths);
+    const auto second_outbox_bytes =
+        read_text(outbox_paths.hub_data / "outbox" / "notifications.jsonl");
+    assert(first_outbox_bytes == second_outbox_bytes);
+
+    assert(acknowledge_notification(
+        outbox_paths,
+        "ntf:auto:evt-decision",
+        "main-agent-test"));
+    auto acknowledged_outbox = load_notification_outbox(outbox_paths);
+    assert(acknowledged_outbox.pending_count() == 0);
+    assert(acknowledged_outbox.items[0].state == "acknowledged");
+    assert(acknowledged_outbox.items[0].actor == "main-agent-test");
+    const auto acknowledged_bytes =
+        read_text(outbox_paths.hub_data / "outbox" / "notifications.jsonl");
+    assert(acknowledge_notification(
+        outbox_paths,
+        "ntf:auto:evt-decision",
+        "main-agent-test"));
+    assert(
+        acknowledged_bytes ==
+        read_text(outbox_paths.hub_data / "outbox" / "notifications.jsonl"));
+
+    write_file(
+        outbox_events / "complete.jsonl",
+        R"({"schema_version":1,"event_id":"evt-complete","event_type":"project.completed","occurred_at":"2026-09-30T12:00:00+08:00","project_id":"complete","correlation_id":"corr-complete","source":{"kind":"monitor","id":"complete-monitor"},"severity":"info","payload":{"summary":"全部计算完成"}})"
+        "\n"
+        R"({"schema_version":1,"event_id":"evt-notify","event_type":"notification.requested","occurred_at":"2026-09-30T12:00:01+08:00","project_id":"complete","correlation_id":"corr-complete","source":{"kind":"monitor","id":"complete-monitor"},"severity":"info","payload":{"notification_id":"ntf-final","target":"main_agent","reason":"project_completed","summary":"结果已经准备好"}})"
+        "\n"
+        R"({"schema_version":1,"event_id":"evt-delivered","event_type":"notification.delivered","occurred_at":"2026-09-30T12:00:02+08:00","project_id":"complete","correlation_id":"corr-complete","source":{"kind":"core","id":"outbox-bridge"},"severity":"info","payload":{"notification_id":"ntf-final","summary":"已交付给主 Agent"}})"
+        "\n");
+
+    notification_outbox = sync_notification_outbox(outbox_paths);
+    assert(notification_outbox.items.size() == 2);
+    const auto completion_notification = std::find_if(
+        notification_outbox.items.begin(),
+        notification_outbox.items.end(),
+        [](const NotificationRecord& item) {
+            return item.notification_id == "ntf-final";
+        });
+    assert(completion_notification != notification_outbox.items.end());
+    assert(!completion_notification->synthetic);
+    assert(completion_notification->reason == "project_completed");
+    assert(completion_notification->state == "delivered");
+    assert(notification_outbox.pending_count() == 1);
+
+    const auto complete_projection =
+        load_project_event_projection(outbox_paths, "complete", 100);
+    assert(complete_projection.issues.empty());
+    const auto notify_event = std::find_if(
+        complete_projection.events.begin(),
+        complete_projection.events.end(),
+        [](const EventRecord& event) {
+            return event.event_type == "notification.requested";
+        });
+    assert(notify_event != complete_projection.events.end());
+    assert(notify_event->notification_id == "ntf-final");
+    assert(notify_event->notification_target == "main_agent");
+    assert(notify_event->notification_reason == "project_completed");
+
+    const auto pending_json =
+        notification_outbox_to_json(notification_outbox, false);
+    assert(pending_json.at("pending_count").as_uint64() == 1);
+    assert(pending_json.at("notifications").as_array().size() == 1);
 
     fs::remove_all(root);
     std::cout << "core tests passed\n";
