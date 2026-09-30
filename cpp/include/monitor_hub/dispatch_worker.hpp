@@ -26,6 +26,7 @@ struct DispatchRecord {
     std::string action_id;
     std::string dispatch_kind;
     std::string handler;
+    json::object handler_config;
     std::string agent_profile;
     std::vector<std::string> constraints;
     std::vector<std::string> completion_criteria;
