@@ -12,6 +12,7 @@
 class QAction;
 class QEvent;
 class QLocalServer;
+class QProcess;
 class QSystemTrayIcon;
 class QTimer;
 
@@ -53,18 +54,28 @@ private:
     void show_settings_dialog();
     void copy_diagnostics();
     void poll_project_notifications(bool baseline_only = false);
+    void apply_control_timer_state(bool run_immediately = false);
+    void start_control_tick();
+    void set_control_status(const QString& text);
+    void report_control_failure(const QString& detail);
+    QString orchestrator_program() const;
 
     QtMainWindow* window_ = nullptr;
     QLocalServer* instance_server_ = nullptr;
     QSystemTrayIcon* tray_ = nullptr;
     QAction* status_action_ = nullptr;
+    QAction* control_action_ = nullptr;
     QTimer* notification_timer_ = nullptr;
+    QTimer* control_timer_ = nullptr;
+    QProcess* control_process_ = nullptr;
 
     DesktopSettings settings_;
     std::map<std::string, ProjectStateMemory> previous_project_states_;
     bool project_state_baselined_ = false;
     bool force_quit_ = false;
     bool background_notice_shown_ = false;
+    bool control_failure_active_ = false;
+    bool previous_needs_main_agent_ = false;
 };
 
 }  // namespace monitor_hub
