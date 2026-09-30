@@ -20,6 +20,8 @@ The optional `monitor_hub_qt` target currently provides a read-only operational 
 - zero-token Claude statusLine bridge for 5-hour / 7-day usage and reset-time display;
 - cdesktop-detach rate-limit event fallback when no statusLine cache is available;
 - direct access to Claude config plus copyable `/usage` command;
+- Claude session/workspace/activity metadata from statusLine without rendering conversation text;
+- read-only workspace/transcript drill-down and recent Agent/tool metadata;
 - project headline and runner state;
 - progress table;
 - dedicated task-detail pane;

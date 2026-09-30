@@ -190,3 +190,76 @@ Use that when you want Claude Code's full native usage screen. Monitor Hub does 
 The portable status-line contract exposes the common 5-hour and 7-day windows. Claude Code may internally track additional model-scoped or credit-specific limits. Monitor Hub does not fabricate those values when they are not present in the status-line payload.
 
 If a usage window is absent, the UI shows it as unknown instead of displaying `0%`.
+
+
+## Session observability
+
+When Claude Code's statusLine payload includes session metadata, Monitor Hub also projects a small read-only session view.
+
+Displayed metadata can include:
+
+- `session_id`;
+- `session_name`;
+- `prompt_id`;
+- current workspace / project directory;
+- current git worktree;
+- transcript file path;
+- current `--agent` name/type when present;
+- most recent tool name seen near the end of the transcript;
+- most recent Agent/Task tool call and its subagent type;
+- freshness of the last statusLine snapshot.
+
+The bridge only stores metadata. It does not store prompt text, assistant text, tool inputs, tool outputs, OAuth credentials or API keys.
+
+### Transcript inspection
+
+If a transcript path is available, the C++ adapter reads only a bounded tail of the local JSONL file and extracts tool-call metadata.
+
+For generic tools, Monitor Hub records only the tool name.
+
+For Agent/Task calls, Monitor Hub records only:
+
+- the tool name;
+- optional `subagent_type`;
+- event timestamp when available.
+
+It deliberately ignores fields such as `prompt`, `description`, command contents and tool results.
+
+The Qt **会话记录** button opens the original local transcript in the user's normal file handler; Monitor Hub does not render the conversation body inside the monitoring UI.
+
+### Session activity state
+
+The sidebar state is conservative:
+
+- **正在工作**: a Claude process is visible and a statusLine snapshot is very recent;
+- **最近活动**: a recent statusLine snapshot exists;
+- **CLI 运行中**: a Claude process is visible but no fresh snapshot is available;
+- **已缓存**: metadata exists but no local Claude process is currently visible;
+- **待接用量**: Claude CLI is installed but statusLine data is not connected;
+- **未发现**: no configured/install candidate is found.
+
+A visible Claude process is not treated as proof that a specific cached session is alive.
+
+
+### Monitor project linking
+
+The Qt Claude card attempts a local path-only association between the current Claude workspace and registered Monitor Hub projects.
+
+Claude-side candidates:
+
+- `workspace.project_dir`;
+- `workspace.current_dir` / `cwd`.
+
+Monitor project candidates:
+
+- `dir`;
+- `qa_cwd`;
+- `runner.workdir`;
+- parent directory of `status_json`;
+- parent directory of `status_md`.
+
+Matching is path-based and case-insensitive for Windows-friendly behavior. Exact matches and ancestor/descendant relationships are accepted; when several projects match, the most specific (longest) project path wins.
+
+Monitor Hub does not link projects by display name.
+
+When a match exists, the Claude card shows the associated Monitor project and enables **关联项目**, which selects that project and opens its project view. When no path match exists, the button remains disabled.

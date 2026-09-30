@@ -41,6 +41,21 @@ QLabel#usageText {
     font-size: 10px;
 }
 
+QLabel#claudeSession {
+    color: #3F3D38;
+    background: #F7F6F2;
+    border-radius: 8px;
+    padding: 5px 7px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+QLabel#claudeActivity {
+    color: #77736C;
+    font-size: 10px;
+    padding: 1px 2px;
+}
+
 QProgressBar#usageBar {
     min-height: 8px;
     max-height: 8px;
