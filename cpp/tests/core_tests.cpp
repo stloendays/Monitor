@@ -197,7 +197,7 @@ int main() {
     write_file(
         claude_status_file,
         std::string(R"({"schema_version":1,"source":"claude_statusline","captured_at":"2026-09-30T10:15:00","version":"2.1.259","session":{"id":"sess-123","name":"monitor-work","prompt_id":"prompt-456","transcript_path":")") +
-        claude_transcript.string() +
+        claude_transcript.generic_string() +
         R"("},"model":{"id":"claude-sonnet-5","display_name":"Claude Sonnet 5"},"workspace":{"current_dir":"C:/demo","project_dir":"C:/demo","git_worktree":"feature-monitor"},"agent":{"name":"monitor-agent","type":"general-purpose"},"context_window":{"used_percentage":31.5},"cost":{"total_cost_usd":1.23},"rate_limits_available":true,"rate_limits":{"five_hour":{"used_percentage":24.0,"resets_at":1788062400},"seven_day":{"used_percentage":13.0,"resets_at":1788580800}}})");
     SystemInfo claude_sys;
     claude_sys.procs.push_back(ProcessInfo{1234, "claude.exe", "claude"});
