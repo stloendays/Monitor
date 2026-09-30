@@ -180,6 +180,34 @@ SetupAgentRuntime setup_agent_runtime_from_env() {
     };
 }
 
+std::vector<std::string> validate_setup_agent_runtime(
+    const SetupAgentRuntime& runtime) {
+
+    std::vector<std::string> errors;
+    std::error_code ec;
+    if (runtime.detach_script.empty() ||
+        !fs::exists(runtime.detach_script, ec) || ec) {
+        errors.push_back(
+            "找不到 detached-agent helper：" +
+            runtime.detach_script.string());
+    }
+
+    auto require_explicit_path = [&](const fs::path& path,
+                                     const std::string& label) {
+        if (path.empty()) {
+            errors.push_back(label + " 路径为空");
+            return;
+        }
+        if (!path.is_absolute() && !path.has_parent_path()) return;
+        std::error_code path_ec;
+        if (!fs::exists(path, path_ec) || path_ec)
+            errors.push_back("找不到 " + label + "：" + path.string());
+    };
+    require_explicit_path(runtime.powershell, "PowerShell");
+    require_explicit_path(runtime.claude_executable, "Claude CLI");
+    return errors;
+}
+
 SetupRequestLaunch prepare_setup_request(
     const RuntimePaths& paths,
     const std::string& body,
