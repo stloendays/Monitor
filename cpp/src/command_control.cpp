@@ -82,6 +82,96 @@ bool contains(
     return std::find(values.begin(), values.end(), expected) != values.end();
 }
 
+bool string_array_value(const json::value* value) {
+    if (!value) return true;
+    if (!value->is_array()) return false;
+    for (const auto& item : value->as_array())
+        if (!item.is_string()) return false;
+    return true;
+}
+
+bool absolute_config_path(
+    const json::object& config,
+    const char* key,
+    bool required,
+    std::string& error) {
+
+    const auto value = str(config.if_contains(key));
+    if (value.empty()) {
+        if (required) {
+            error = std::string("handler_config missing ") + key;
+            return false;
+        }
+        return true;
+    }
+
+    if (!fs::path(value).is_absolute()) {
+        error =
+            std::string("handler_config.") + key +
+            " must be an absolute path";
+        return false;
+    }
+    return true;
+}
+
+bool validate_handler_config(
+    const PolicyAction& action,
+    std::string& error) {
+
+    if (action.authority != "L1") return true;
+
+    if (action.handler == "read_only_probe") {
+        if (!action.handler_config.empty()) {
+            error =
+                "read_only_probe does not accept handler_config";
+            return false;
+        }
+        return true;
+    }
+
+    if (action.handler == "local_process_restart_v1") {
+        if (!absolute_config_path(
+                action.handler_config,
+                "program",
+                true,
+                error))
+            return false;
+        if (!absolute_config_path(
+                action.handler_config,
+                "working_directory",
+                false,
+                error))
+            return false;
+        if (!string_array_value(
+                action.handler_config.if_contains("arguments"))) {
+            error =
+                "handler_config.arguments must be an array of strings";
+            return false;
+        }
+        return true;
+    }
+
+    if (action.handler == "pbs_qsub_restart_v1") {
+        if (!absolute_config_path(
+                action.handler_config,
+                "script_path",
+                true,
+                error))
+            return false;
+        if (!absolute_config_path(
+                action.handler_config,
+                "working_directory",
+                false,
+                error))
+            return false;
+        return true;
+    }
+
+    // Unknown handlers are permitted in policy for forward compatibility,
+    // but the worker will fail closed until an audited implementation exists.
+    return true;
+}
+
 fs::path commands_dir(const RuntimePaths& paths) {
     return paths.hub_data / "commands";
 }
@@ -322,6 +412,16 @@ std::optional<RecoveryPolicy> parse_policy(
         action.authority = str(item.if_contains("authority"));
         action.dispatch_kind = str(item.if_contains("dispatch_kind"));
         action.handler = str(item.if_contains("handler"));
+        if (const auto* handler_config =
+                item.if_contains("handler_config")) {
+            if (!handler_config->is_object()) {
+                error =
+                    "policy action handler_config must be an object: " +
+                    action.action_id;
+                return std::nullopt;
+            }
+            action.handler_config = handler_config->as_object();
+        }
         action.agent_profile = str(item.if_contains("agent_profile"));
         action.allowed_command_types =
             string_array(item.if_contains("allowed_command_types"));
@@ -368,6 +468,8 @@ std::optional<RecoveryPolicy> parse_policy(
                 action.action_id;
             return std::nullopt;
         }
+        if (!validate_handler_config(action, error))
+            return std::nullopt;
         policy.actions.push_back(std::move(action));
     }
 
@@ -612,6 +714,8 @@ json::object dispatch_record(
     out["action_id"] = action.action_id;
     out["dispatch_kind"] = action.dispatch_kind;
     if (!action.handler.empty()) out["handler"] = action.handler;
+    if (!action.handler_config.empty())
+        out["handler_config"] = action.handler_config;
     if (!action.agent_profile.empty())
         out["agent_profile"] = action.agent_profile;
     out["constraints"] = json_strings(constraints);
