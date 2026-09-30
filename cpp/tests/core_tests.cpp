@@ -1,4 +1,5 @@
 #include "monitor_hub/core.hpp"
+#include "monitor_hub/event_store.hpp"
 #include "monitor_hub/overview.hpp"
 #include "monitor_hub/claude_cli.hpp"
 
@@ -220,6 +221,82 @@ int main() {
            *stream_claude.five_hour.used_percentage == 42.0);
     assert(stream_claude.seven_day.used_percentage &&
            *stream_claude.seven_day.used_percentage == 21.0);
+
+    // Protocol v1 events are append-only facts. Duplicate IDs are ignored,
+    // malformed lines are isolated, and Agent action completion does not
+    // resolve an issue without an explicit recovery/resolution event.
+    const auto alpha_event_file = paths.hub_data / "events" / "alpha.jsonl";
+    write_file(
+        alpha_event_file,
+        R"({"schema_version":1,"event_id":"evt-1","event_type":"issue.detected","occurred_at":"2026-09-30T10:00:00+08:00","project_id":"alpha","task_id":"a1","issue_id":"iss-1","correlation_id":"corr-1","source":{"kind":"monitor","id":"alpha-monitor"},"severity":"warning","payload":{"summary":"SCF non-convergence"}})"
+        "\n"
+        R"({"schema_version":1,"event_id":"evt-2","event_type":"agent.started","occurred_at":"2026-09-30T10:01:00+08:00","project_id":"alpha","task_id":"a1","issue_id":"iss-1","agent_run_id":"agent-1","correlation_id":"corr-1","source":{"kind":"child_agent","id":"troubleshooter"},"severity":"info","payload":{"summary":"正在检查 OUTCAR"}})"
+        "\n"
+        R"({"schema_version":1,"event_id":"evt-3","event_type":"agent.action_finished","occurred_at":"2026-09-30T10:02:00+08:00","project_id":"alpha","task_id":"a1","issue_id":"iss-1","agent_run_id":"agent-1","correlation_id":"corr-1","source":{"kind":"child_agent","id":"troubleshooter"},"severity":"info","payload":{"summary":"已完成受限恢复动作"}})"
+        "\n"
+        R"({"schema_version":1,"event_id":"evt-4","event_type":"issue.user_action_required","occurred_at":"2026-09-30T10:03:00+08:00","project_id":"alpha","task_id":"a1","issue_id":"iss-1","correlation_id":"corr-1","source":{"kind":"monitor","id":"alpha-monitor"},"severity":"warning","payload":{"summary":"需要选择科学上不同的恢复方案","authority":"L3"}})"
+        "\n"
+        R"({"schema_version":1,"event_id":"evt-4","event_type":"issue.user_action_required","occurred_at":"2026-09-30T10:03:00+08:00","project_id":"alpha","task_id":"a1","issue_id":"iss-1","correlation_id":"corr-1","source":{"kind":"monitor","id":"alpha-monitor"},"severity":"warning","payload":{"summary":"重复投递不应重复执行","authority":"L3"}})"
+        "\n"
+        "{bad json}\n"
+        R"({"schema_version":1,"event_id":"evt-5","event_type":"vendor.custom_observation","occurred_at":"2026-09-30T10:04:00+08:00","project_id":"alpha","source":{"kind":"adapter","id":"custom"},"severity":"info","payload":{"summary":"未知事件仍保留"}})"
+        "\n");
+
+    const auto alpha_events =
+        load_project_event_projection(paths, "alpha", 100);
+    assert(alpha_events.events.size() == 5);
+    assert(alpha_events.duplicate_events == 1);
+    assert(alpha_events.malformed_lines == 1);
+    assert(alpha_events.issues.size() == 1);
+    assert(alpha_events.issues[0].issue_id == "iss-1");
+    assert(alpha_events.issues[0].state == "user_action_required");
+    assert(alpha_events.issues[0].authority == "L3");
+    assert(alpha_events.issues[0].user_action_required);
+    assert(!alpha_events.issues[0].resolved);
+    assert(alpha_events.issues[0].current_action == "已完成受限恢复动作");
+    assert(alpha_events.has_user_attention());
+    assert(alpha_events.events.back().event_type == "vendor.custom_observation");
+
+    std::map<std::string, ProjectEventProjection> event_projections;
+    event_projections["alpha"] = alpha_events;
+    const auto event_overview = build_overview_model(
+        overview_projects,
+        overview_snapshots,
+        event_projections,
+        8);
+    const auto event_attention = std::find_if(
+        event_overview.attention.begin(),
+        event_overview.attention.end(),
+        [](const OverviewAttentionItem& item) {
+            return item.project_id == "alpha" &&
+                   item.issue_id == "iss-1" &&
+                   item.source == "event";
+        });
+    assert(event_attention != event_overview.attention.end());
+    assert(event_attention->kind == "需要决策");
+    assert(event_overview.activity.size() >= 2);
+    assert(std::any_of(
+        event_overview.activity.begin(),
+        event_overview.activity.end(),
+        [](const OverviewAgentActivity& item) {
+            return item.project_id == "alpha" &&
+                   item.source == "event" &&
+                   item.summary == "已完成受限恢复动作";
+        }));
+
+    write_file(
+        alpha_event_file,
+        read_text(alpha_event_file) +
+        R"({"schema_version":1,"event_id":"evt-6","event_type":"issue.recovery_verified","occurred_at":"2026-09-30T10:05:00+08:00","project_id":"alpha","task_id":"a1","issue_id":"iss-1","correlation_id":"corr-1","source":{"kind":"monitor","id":"alpha-monitor"},"severity":"info","payload":{"summary":"恢复证据通过"}})"
+        "\n"
+        R"({"schema_version":1,"event_id":"evt-7","event_type":"issue.resolved","occurred_at":"2026-09-30T10:06:00+08:00","project_id":"alpha","task_id":"a1","issue_id":"iss-1","correlation_id":"corr-1","source":{"kind":"monitor","id":"alpha-monitor"},"severity":"info","payload":{"summary":"问题已解决"}})"
+        "\n");
+    const auto resolved_events =
+        load_project_event_projection(paths, "alpha", 100);
+    assert(resolved_events.issues.size() == 1);
+    assert(resolved_events.issues[0].resolved);
+    assert(!resolved_events.issues[0].user_action_required);
+    assert(!resolved_events.has_user_attention());
 
     fs::remove_all(root);
     std::cout << "core tests passed\n";
