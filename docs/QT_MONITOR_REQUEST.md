@@ -27,6 +27,10 @@ The setup prompt requires the Agent to:
 - create a project recovery policy when automatic recovery is authorized;
 - use policy-owned `handler_config` for deterministic executable/script/argv authority;
 - validate generated policy through `monitor_hub_control --validate-policy-ref` before enabling it;
+- configure the project monitor to submit idempotent Protocol commands through `monitor_hub_control --submit-command` when a policy action matches an Issue;
+- preserve stable `issue_id`, `correlation_id`, and command identity across the recovery attempt;
+- keep execution in the global control orchestrator rather than letting each monitor directly execute L1/L2 work;
+- make the monitor independently emit `issue.recovery_started / recovery_verified / resolved` only after downstream evidence confirms recovery;
 - use an exact existing launcher/PBS script for L1 restart, never invent a generic shell command;
 - fall back to bounded L2 or L3 when exact deterministic authority is unavailable;
 - escalate anything outside the delegated boundary as L3;
