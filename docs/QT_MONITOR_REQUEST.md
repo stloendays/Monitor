@@ -8,7 +8,7 @@ The Qt desktop now carries the legacy **新建监控任务** workflow forward as
 2. Fill the request template. At minimum:
    - `项目名称`
    - `项目目录（本机路径）`
-3. Describe completion criteria, monitor cadence, allowed automatic actions, forbidden actions, notification conditions, and final deliverables.
+3. Describe completion criteria, monitor cadence, allowed automatic actions, forbidden actions, notification conditions, final deliverables, and any **existing validated restart entrypoint** (fixed local launcher or PBS restart script).
 4. Confirm the authority boundary.
 5. Monitor Hub writes:
    - `MONITOR_HUB_DATA/requests/<stamp>_request.md`
@@ -24,11 +24,17 @@ The setup prompt requires the Agent to:
 - inspect project governance before changing files;
 - verify live state and reuse an existing monitor when one already covers the work;
 - treat **允许监控自动做的操作** and **禁止的操作** as hard authority boundaries;
+- create a project recovery policy when automatic recovery is authorized;
+- use policy-owned `handler_config` for deterministic executable/script/argv authority;
+- validate generated policy through `monitor_hub_control --validate-policy-ref` before enabling it;
+- use an exact existing launcher/PBS script for L1 restart, never invent a generic shell command;
+- fall back to bounded L2 or L3 when exact deterministic authority is unavailable;
 - escalate anything outside the delegated boundary as L3;
 - avoid deleting outputs or changing scientific/business method without explicit authorization;
 - register the resulting monitor in the existing registry;
 - keep the current `hub_status.json` contract;
 - emit Protocol v1 events when practical;
+- report `POLICY_REF:` and `AUTO_ACTIONS:` explicitly;
 - end the setup report with one `NEEDS_USER:` line.
 
 The Qt UI validates the local PowerShell, detach-helper and Claude CLI runtime before creating a request. The final launch still requires an explicit confirmation.
