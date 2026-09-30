@@ -35,6 +35,7 @@ private:
     void build_ui();
     void refresh();
     void render_context_header();
+    void refresh_quick_actions();
     void render_overview();
     void render_sidebar();
     void select_project(const std::string& id);
@@ -48,7 +49,9 @@ private:
     const json::object* selected_task_meta() const;
 
     void open_task_target(const std::string& key = {});
+    void open_quick_target(const std::string& kind);
     void copy_task_command();
+    void copy_debug_summary();
 
     RuntimePaths paths_;
     SystemInfo system_;
@@ -63,6 +66,19 @@ private:
     QLabel* health_ = nullptr;
     QLabel* headline_ = nullptr;
     QLabel* runner_ = nullptr;
+    QLabel* quick_feedback_ = nullptr;
+    QPushButton* quick_refresh_ = nullptr;
+    QPushButton* quick_monitor_dir_ = nullptr;
+    QPushButton* quick_status_ = nullptr;
+    QPushButton* quick_log_ = nullptr;
+    QPushButton* quick_task_dir_ = nullptr;
+    QPushButton* quick_result_ = nullptr;
+    QPushButton* quick_takeovers_ = nullptr;
+    QPushButton* quick_registry_ = nullptr;
+    QPushButton* quick_hub_data_ = nullptr;
+    QPushButton* quick_job_root_ = nullptr;
+    QPushButton* quick_copy_command_ = nullptr;
+    QPushButton* quick_copy_debug_ = nullptr;
     QTabWidget* tabs_ = nullptr;
 
     QLabel* overview_counts_ = nullptr;

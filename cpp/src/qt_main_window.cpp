@@ -251,11 +251,6 @@ void QtMainWindow::build_ui() {
     area_->setObjectName(QStringLiteral("pageMeta"));
     title_line->addWidget(area_);
     title_line->addStretch();
-    auto* refresh_button = new QPushButton(QStringLiteral("刷新"), header);
-    refresh_button->setProperty("role", QStringLiteral("secondary"));
-    refresh_button->setToolTip(QStringLiteral("重新读取 Task Scheduler、WMI 进程和状态文件；不会启动、停止或修改计算任务。"));
-    title_line->addWidget(refresh_button);
-    connect(refresh_button, &QPushButton::clicked, this, [this] { this->refresh(); });
     header_layout->addLayout(title_line);
 
     auto* state_line = new QHBoxLayout();
@@ -277,6 +272,149 @@ void QtMainWindow::build_ui() {
     runner_->setWordWrap(true);
     header_layout->addWidget(runner_);
     main_layout->addWidget(header);
+
+    auto* quick_bar = new QFrame(main);
+    quick_bar->setObjectName(QStringLiteral("quickBar"));
+    quick_bar->setFrameShape(QFrame::NoFrame);
+    auto* quick_layout = new QVBoxLayout(quick_bar);
+    quick_layout->setContentsMargins(14, 10, 14, 10);
+    quick_layout->setSpacing(8);
+
+    auto* quick_head = new QHBoxLayout();
+    auto* quick_title = new QLabel(QStringLiteral("快速调试"), quick_bar);
+    quick_title->setObjectName(QStringLiteral("sectionLabel"));
+    quick_head->addWidget(quick_title);
+    quick_feedback_ = new QLabel(QStringLiteral("只读安全操作"), quick_bar);
+    quick_feedback_->setObjectName(QStringLiteral("quickFeedback"));
+    quick_head->addWidget(quick_feedback_);
+    quick_head->addStretch();
+    quick_head->addWidget(info_button(
+        QStringLiteral("新手推荐顺序：先“刷新状态”，再看“状态文件”和“监控日志”；"
+                       "如果 Monitor 已启动 Agent，再看“后台记录”；最后检查“结果”。"
+                       "这一排按钮不会暂停、重启或修改计算参数。"),
+        quick_bar));
+    quick_layout->addLayout(quick_head);
+
+    auto make_quick = [quick_bar](const QString& text, const QString& tip) {
+        auto* button = new QPushButton(text, quick_bar);
+        button->setProperty("role", QStringLiteral("quick"));
+        button->setToolTip(tip);
+        return button;
+    };
+
+    quick_refresh_ = make_quick(
+        QStringLiteral("↻ 刷新状态"),
+        QStringLiteral("重新读取 Task Scheduler、WMI 和状态文件。只读，不会启动或停止任务。"));
+    quick_monitor_dir_ = make_quick(
+        QStringLiteral("监控目录"),
+        QStringLiteral("打开当前项目登记的 monitor 目录，适合检查脚本、状态文件和 takeover 记录。"));
+    quick_status_ = make_quick(
+        QStringLiteral("状态文件"),
+        QStringLiteral("打开当前项目的 hub_status.json / legacy status Markdown。先看它最容易判断 Monitor 实际读到了什么。"));
+    quick_log_ = make_quick(
+        QStringLiteral("监控日志"),
+        QStringLiteral("优先打开当前任务日志；没有任务日志时打开项目登记的监控日志。"));
+    quick_task_dir_ = make_quick(
+        QStringLiteral("任务目录"),
+        QStringLiteral("打开当前选中任务的 open_path / path / workdir。没有结构化任务路径时会禁用。"));
+    quick_result_ = make_quick(
+        QStringLiteral("结果"),
+        QStringLiteral("优先打开当前任务结果；没有任务结果时打开项目登记的第一个已生成结果。"));
+    quick_takeovers_ = make_quick(
+        QStringLiteral("后台记录"),
+        QStringLiteral("切换到后台处理记录，查看 Monitor 启动的 Agent/takeover 历史。"));
+    quick_registry_ = make_quick(
+        QStringLiteral("登记表"),
+        QStringLiteral("打开 monitor_hub_projects.json。项目没有出现在侧边栏时，先检查这里的 id、路径和 runner 配置。"));
+    quick_hub_data_ = make_quick(
+        QStringLiteral("Hub 数据"),
+        QStringLiteral("打开 Monitor Hub 本地数据目录，用来检查 requests、events、outbox 等运行数据。"));
+    quick_job_root_ = make_quick(
+        QStringLiteral("作业目录"),
+        QStringLiteral("打开 cdesktop-jobs 目录，用来检查 detached monitor / child-agent 的 pid、exitcode、output.log。"));
+    quick_copy_command_ = make_quick(
+        QStringLiteral("复制命令"),
+        QStringLiteral("复制当前任务命令；没有任务命令时尝试复制项目 runner/start command。不会执行。"));
+    quick_copy_debug_ = make_quick(
+        QStringLiteral("复制诊断"),
+        QStringLiteral("把当前项目、状态、runner、关键路径和选中任务信息复制到剪贴板，便于发给 Agent 排查。不会复制密码或 token。"));
+
+    auto* project_actions = new QHBoxLayout();
+    project_actions->setSpacing(7);
+    for (auto* button : {
+             quick_refresh_, quick_monitor_dir_, quick_status_, quick_log_,
+             quick_task_dir_, quick_result_, quick_takeovers_}) {
+        project_actions->addWidget(button);
+    }
+    project_actions->addStretch();
+    quick_layout->addLayout(project_actions);
+
+    auto* system_actions = new QHBoxLayout();
+    system_actions->setSpacing(7);
+    for (auto* button : {
+             quick_registry_, quick_hub_data_, quick_job_root_,
+             quick_copy_command_, quick_copy_debug_}) {
+        system_actions->addWidget(button);
+    }
+    system_actions->addStretch();
+    quick_layout->addLayout(system_actions);
+
+    connect(quick_refresh_, &QPushButton::clicked, this, [this] {
+        this->refresh();
+        if (quick_feedback_) quick_feedback_->setText(QStringLiteral("已刷新"));
+        QTimer::singleShot(2200, this, [this] {
+            if (quick_feedback_) quick_feedback_->setText(QStringLiteral("只读安全操作"));
+        });
+    });
+    connect(quick_monitor_dir_, &QPushButton::clicked, this, [this] {
+        open_quick_target("monitor_dir");
+    });
+    connect(quick_status_, &QPushButton::clicked, this, [this] {
+        open_quick_target("status");
+    });
+    connect(quick_log_, &QPushButton::clicked, this, [this] {
+        open_quick_target("log");
+    });
+    connect(quick_task_dir_, &QPushButton::clicked, this, [this] {
+        open_quick_target("task_dir");
+    });
+    connect(quick_result_, &QPushButton::clicked, this, [this] {
+        open_quick_target("result");
+    });
+    connect(quick_takeovers_, &QPushButton::clicked, this, [this] {
+        if (tabs_) tabs_->setCurrentIndex(2);
+    });
+    connect(quick_registry_, &QPushButton::clicked, this, [this] {
+        open_quick_target("registry");
+    });
+    connect(quick_hub_data_, &QPushButton::clicked, this, [this] {
+        open_quick_target("hub_data");
+    });
+    connect(quick_job_root_, &QPushButton::clicked, this, [this] {
+        open_quick_target("job_root");
+    });
+    connect(quick_copy_command_, &QPushButton::clicked, this, [this] {
+        const auto* meta = selected_task_meta();
+        std::string command = meta ? s(meta->if_contains("command")) : std::string{};
+        const auto* project = current_project();
+        if (command.empty() && project) command = s(project->if_contains("action"));
+        if (command.empty() && project) {
+            if (const auto* runner = object(project->if_contains("runner")))
+                command = s(runner->if_contains("start_cmd"));
+        }
+        if (!command.empty()) {
+            QApplication::clipboard()->setText(q(command));
+            if (quick_feedback_) quick_feedback_->setText(QStringLiteral("命令已复制"));
+            QTimer::singleShot(2200, this, [this] {
+                if (quick_feedback_) quick_feedback_->setText(QStringLiteral("只读安全操作"));
+            });
+        }
+    });
+    connect(quick_copy_debug_, &QPushButton::clicked, this, [this] {
+        copy_debug_summary();
+    });
+
+    main_layout->addWidget(quick_bar);
 
     tabs_ = new QTabWidget(main);
     tabs_->setObjectName(QStringLiteral("mainTabs"));
@@ -588,6 +726,7 @@ void QtMainWindow::refresh() {
     render_sidebar();
     render_project();
     render_context_header();
+    refresh_quick_actions();
 }
 
 std::vector<QtDesktopProjectState> QtMainWindow::desktop_project_states() const {
@@ -661,6 +800,85 @@ void QtMainWindow::render_context_header() {
 
     const auto* runner = object(snap->if_contains("runner"));
     runner_->setText(runner ? q(s(runner->if_contains("text"))) : QString{});
+}
+
+void QtMainWindow::refresh_quick_actions() {
+    const auto* project = current_project();
+    const auto* snap = current_snapshot();
+    const auto* meta = selected_task_meta();
+
+    auto existing_value = [](const json::object* source,
+                             std::initializer_list<const char*> keys) {
+        if (!source) return std::string{};
+        for (const auto* key : keys) {
+            const auto value = s(source->if_contains(key));
+            if (local_exists(value)) return value;
+        }
+        return std::string{};
+    };
+
+    auto monitor_dir = existing_value(project, {"dir", "qa_cwd"});
+    if (monitor_dir.empty() && project) {
+        if (const auto* runner = object(project->if_contains("runner")))
+            monitor_dir = existing_value(runner, {"workdir"});
+    }
+    if (monitor_dir.empty()) {
+        const auto status = existing_value(project, {"status_json", "status_md"});
+        if (!status.empty()) {
+            std::error_code ec;
+            const auto parent = std::filesystem::path(status).parent_path();
+            if (std::filesystem::exists(parent, ec) && !ec)
+                monitor_dir = parent.string();
+        }
+    }
+
+    const auto status_path = existing_value(project, {"status_json", "status_md"});
+    auto log_path = existing_value(meta, {"log"});
+    if (log_path.empty()) log_path = existing_value(project, {"log"});
+    const auto task_dir = existing_value(meta, {"open_path", "path", "workdir"});
+
+    auto result_path = existing_value(meta, {"result"});
+    if (result_path.empty() && snap) {
+        if (const auto* results = array(snap->if_contains("results_list"))) {
+            for (const auto& value : *results) {
+                const auto* pair = array(&value);
+                if (!pair || pair->size() < 2) continue;
+                const auto path = s(&(*pair)[1]);
+                if (local_exists(path)) {
+                    result_path = path;
+                    break;
+                }
+            }
+        }
+    }
+
+    std::string command = meta ? s(meta->if_contains("command")) : std::string{};
+    if (command.empty() && project) command = s(project->if_contains("action"));
+    if (command.empty() && project) {
+        if (const auto* runner = object(project->if_contains("runner")))
+            command = s(runner->if_contains("start_cmd"));
+    }
+
+    if (quick_refresh_) quick_refresh_->setEnabled(true);
+    if (quick_monitor_dir_) quick_monitor_dir_->setEnabled(!monitor_dir.empty());
+    if (quick_status_) quick_status_->setEnabled(!status_path.empty());
+    if (quick_log_) quick_log_->setEnabled(!log_path.empty());
+    if (quick_task_dir_) quick_task_dir_->setEnabled(!task_dir.empty());
+    if (quick_result_) quick_result_->setEnabled(!result_path.empty());
+    if (quick_takeovers_) quick_takeovers_->setEnabled(project != nullptr);
+    if (quick_registry_) {
+        std::error_code ec;
+        const bool exists = std::filesystem::exists(paths_.registry, ec) && !ec;
+        const auto parent = paths_.registry.parent_path();
+        std::error_code parent_ec;
+        const bool parent_exists =
+            !parent.empty() && std::filesystem::exists(parent, parent_ec) && !parent_ec;
+        quick_registry_->setEnabled(exists || parent_exists);
+    }
+    if (quick_hub_data_) quick_hub_data_->setEnabled(local_exists(paths_.hub_data.string()));
+    if (quick_job_root_) quick_job_root_->setEnabled(local_exists(paths_.job_root.string()));
+    if (quick_copy_command_) quick_copy_command_->setEnabled(!command.empty());
+    if (quick_copy_debug_) quick_copy_debug_->setEnabled(project != nullptr);
 }
 
 void QtMainWindow::render_overview() {
@@ -789,6 +1007,7 @@ void QtMainWindow::select_project(const std::string& id) {
     selected_task_id_.clear();
     render_project();
     render_context_header();
+    refresh_quick_actions();
 }
 
 void QtMainWindow::render_project() {
@@ -927,6 +1146,7 @@ void QtMainWindow::render_task_detail() {
     open_log_->setEnabled(meta && local_exists(s(meta->if_contains("log"))));
     open_result_->setEnabled(meta && local_exists(s(meta->if_contains("result"))));
     copy_command_->setEnabled(meta && !s(meta->if_contains("command")).empty());
+    refresh_quick_actions();
 }
 
 void QtMainWindow::open_task_target(const std::string& key) {
@@ -945,11 +1165,139 @@ void QtMainWindow::open_task_target(const std::string& key) {
     }
 }
 
+void QtMainWindow::open_quick_target(const std::string& kind) {
+    const auto* project = current_project();
+    const auto* snap = current_snapshot();
+    const auto* meta = selected_task_meta();
+
+    auto existing_value = [](const json::object* source,
+                             std::initializer_list<const char*> keys) {
+        if (!source) return std::string{};
+        for (const auto* key : keys) {
+            const auto value = s(source->if_contains(key));
+            if (local_exists(value)) return value;
+        }
+        return std::string{};
+    };
+
+    std::string target;
+    if (kind == "monitor_dir") {
+        target = existing_value(project, {"dir", "qa_cwd"});
+        if (target.empty() && project) {
+            if (const auto* runner = object(project->if_contains("runner")))
+                target = existing_value(runner, {"workdir"});
+        }
+        if (target.empty()) {
+            const auto status = existing_value(project, {"status_json", "status_md"});
+            if (!status.empty()) {
+                std::error_code ec;
+                const auto parent = std::filesystem::path(status).parent_path();
+                if (std::filesystem::exists(parent, ec) && !ec)
+                    target = parent.string();
+            }
+        }
+    } else if (kind == "status") {
+        target = existing_value(project, {"status_json", "status_md"});
+    } else if (kind == "log") {
+        target = existing_value(meta, {"log"});
+        if (target.empty()) target = existing_value(project, {"log"});
+    } else if (kind == "task_dir") {
+        target = existing_value(meta, {"open_path", "path", "workdir"});
+    } else if (kind == "result") {
+        target = existing_value(meta, {"result"});
+        if (target.empty() && snap) {
+            if (const auto* results = array(snap->if_contains("results_list"))) {
+                for (const auto& value : *results) {
+                    const auto* pair = array(&value);
+                    if (!pair || pair->size() < 2) continue;
+                    const auto path = s(&(*pair)[1]);
+                    if (local_exists(path)) {
+                        target = path;
+                        break;
+                    }
+                }
+            }
+        }
+    } else if (kind == "registry") {
+        if (local_exists(paths_.registry.string())) {
+            target = paths_.registry.string();
+        } else {
+            std::error_code ec;
+            const auto parent = paths_.registry.parent_path();
+            if (!parent.empty() && std::filesystem::exists(parent, ec) && !ec)
+                target = parent.string();
+        }
+    } else if (kind == "hub_data") {
+        if (local_exists(paths_.hub_data.string())) target = paths_.hub_data.string();
+    } else if (kind == "job_root") {
+        if (local_exists(paths_.job_root.string())) target = paths_.job_root.string();
+    }
+
+    if (!target.empty()) open_local(target);
+}
+
 void QtMainWindow::copy_task_command() {
     const auto* meta = selected_task_meta();
     if (!meta) return;
     const auto command = s(meta->if_contains("command"));
     if (!command.empty()) QApplication::clipboard()->setText(q(command));
+}
+
+void QtMainWindow::copy_debug_summary() {
+    const auto* project = current_project();
+    const auto* snap = current_snapshot();
+    if (!project || !snap) return;
+
+    QStringList lines;
+    lines << QStringLiteral("Monitor Hub debug context");
+    lines << QStringLiteral("project_id=%1").arg(q(s(project->if_contains("id"))));
+    lines << QStringLiteral("project_name=%1").arg(q(s(project->if_contains("name"))));
+    lines << QStringLiteral("area=%1").arg(q(s(project->if_contains("area"))));
+    lines << QStringLiteral("adapter=%1").arg(q(s(project->if_contains("adapter"))));
+    lines << QStringLiteral("health=%1").arg(q(s(snap->if_contains("health"))));
+
+    auto headline = s(snap->if_contains("problem"));
+    if (headline.empty()) headline = s(snap->if_contains("headline"));
+    lines << QStringLiteral("headline=%1").arg(q(headline));
+
+    if (const auto* runner = object(snap->if_contains("runner")))
+        lines << QStringLiteral("runner=%1").arg(q(s(runner->if_contains("text"))));
+
+    for (const auto& pair : std::vector<std::pair<const char*, QString>>{
+             {"dir", QStringLiteral("monitor_dir")},
+             {"status_json", QStringLiteral("status_json")},
+             {"status_md", QStringLiteral("status_md")},
+             {"log", QStringLiteral("project_log")},
+             {"qa_cwd", QStringLiteral("qa_cwd")}}) {
+        const auto value = s(project->if_contains(pair.first));
+        if (!value.empty()) lines << pair.second + QStringLiteral("=") + q(value);
+    }
+
+    lines << QStringLiteral("registry=%1").arg(q(paths_.registry.string()));
+    lines << QStringLiteral("hub_data=%1").arg(q(paths_.hub_data.string()));
+    lines << QStringLiteral("job_root=%1").arg(q(paths_.job_root.string()));
+
+    if (const auto* meta = selected_task_meta()) {
+        const auto task_id = s(meta->if_contains("task_id"));
+        if (!task_id.empty()) lines << QStringLiteral("task_id=%1").arg(q(task_id));
+        for (const auto& pair : std::vector<std::pair<const char*, QString>>{
+                 {"job_id", QStringLiteral("job_id")},
+                 {"host", QStringLiteral("host")},
+                 {"open_path", QStringLiteral("task_open_path")},
+                 {"path", QStringLiteral("task_path")},
+                 {"workdir", QStringLiteral("task_workdir")},
+                 {"log", QStringLiteral("task_log")},
+                 {"result", QStringLiteral("task_result")}}) {
+            const auto value = s(meta->if_contains(pair.first));
+            if (!value.empty()) lines << pair.second + QStringLiteral("=") + q(value);
+        }
+    }
+
+    QApplication::clipboard()->setText(lines.join(QStringLiteral("\n")));
+    if (quick_feedback_) quick_feedback_->setText(QStringLiteral("诊断上下文已复制"));
+    QTimer::singleShot(2600, this, [this] {
+        if (quick_feedback_) quick_feedback_->setText(QStringLiteral("只读安全操作"));
+    });
 }
 
 void QtMainWindow::render_takeovers() {

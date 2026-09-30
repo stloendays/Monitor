@@ -114,3 +114,37 @@ The top context header follows navigation state:
 - project tabs show the selected project, its health, headline, and runner state.
 
 This prevents a selected project's title from visually leaking into the cross-project Overview.
+
+
+## 7. Quick-debug action bar
+
+The desktop UI exposes a persistent **快速调试** bar for low-risk inspection tasks.
+
+The default buttons are:
+
+- refresh normalized monitor state;
+- open the registered monitor directory;
+- open the registered status file;
+- open the selected-task or project monitor log;
+- open the selected task directory;
+- open the selected-task or first available project result;
+- jump to background Agent/takeover records;
+- open the global project registry;
+- open the Hub runtime-data directory;
+- open the detached-job root;
+- copy the selected task or runner command without executing it;
+- copy a bounded diagnostic context for troubleshooting.
+
+Rules:
+
+- these actions are read-only and must not pause, restart, resubmit or change scientific/runtime parameters;
+- unavailable actions are disabled instead of producing dead-end clicks;
+- task-level paths take precedence where the user has explicitly selected a task;
+- project-level paths are the fallback for monitor-level debugging;
+- global registry/runtime/job-root buttons make configuration discovery possible without memorizing filesystem layout;
+- the actions are split into two rows: current project/task inspection and global configuration/runtime inspection;
+- each button carries a tooltip explaining when to use it and its side effects;
+- the help tooltip recommends the beginner flow: refresh → status file → monitor log → background records → results;
+- copying diagnostics must not include tokens, passwords, API keys or private credentials.
+
+State-changing controls such as pause/resume/run-now belong in a separate, clearly marked control surface with explicit authority and confirmation rules.
