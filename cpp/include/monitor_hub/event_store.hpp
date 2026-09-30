@@ -38,6 +38,12 @@ struct IssueProjection {
     std::string current_action;
     std::string agent_run_id;
     std::string last_event_at;
+    bool agent_active = false;
+    bool agent_failed = false;
+    bool action_applied = false;
+    bool task_restarted = false;
+    bool recovery_started = false;
+    bool recovery_verified = false;
     bool user_action_required = false;
     bool resolved = false;
 };
@@ -61,5 +67,8 @@ ProjectEventProjection load_project_event_projection(
 
 std::string event_display_name(const std::string& event_type);
 std::string issue_state_display_name(const std::string& state);
+std::string issue_recovery_stage(const IssueProjection& issue);
+std::string issue_recovery_stage_display_name(const std::string& stage);
+std::string issue_recovery_next_step(const IssueProjection& issue);
 
 }  // namespace monitor_hub
