@@ -156,7 +156,7 @@ QtMainWindow::QtMainWindow(RuntimePaths paths, QWidget* parent)
     : QMainWindow(parent), paths_(std::move(paths)) {
     build_ui();
     resize(1420, 900);
-    setWindowTitle(QStringLiteral("Monitor Hub · C++ / Qt"));
+    setWindowTitle(QStringLiteral("Monitor Hub"));
     refresh();
 
     timer_ = new QTimer(this);
