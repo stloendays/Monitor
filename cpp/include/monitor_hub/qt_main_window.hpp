@@ -74,6 +74,9 @@ private:
     QPushButton* quick_task_dir_ = nullptr;
     QPushButton* quick_result_ = nullptr;
     QPushButton* quick_takeovers_ = nullptr;
+    QPushButton* quick_registry_ = nullptr;
+    QPushButton* quick_hub_data_ = nullptr;
+    QPushButton* quick_job_root_ = nullptr;
     QPushButton* quick_copy_command_ = nullptr;
     QPushButton* quick_copy_debug_ = nullptr;
     QTabWidget* tabs_ = nullptr;
