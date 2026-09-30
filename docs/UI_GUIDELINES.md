@@ -129,6 +129,9 @@ The default buttons are:
 - open the selected task directory;
 - open the selected-task or first available project result;
 - jump to background Agent/takeover records;
+- open the global project registry;
+- open the Hub runtime-data directory;
+- open the detached-job root;
 - copy the selected task or runner command without executing it;
 - copy a bounded diagnostic context for troubleshooting.
 
@@ -138,6 +141,8 @@ Rules:
 - unavailable actions are disabled instead of producing dead-end clicks;
 - task-level paths take precedence where the user has explicitly selected a task;
 - project-level paths are the fallback for monitor-level debugging;
+- global registry/runtime/job-root buttons make configuration discovery possible without memorizing filesystem layout;
+- the actions are split into two rows: current project/task inspection and global configuration/runtime inspection;
 - each button carries a tooltip explaining when to use it and its side effects;
 - the help tooltip recommends the beginner flow: refresh → status file → monitor log → background records → results;
 - copying diagnostics must not include tokens, passwords, API keys or private credentials.
