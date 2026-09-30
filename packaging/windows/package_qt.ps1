@@ -30,8 +30,11 @@ function Invoke-GuiSmoke([string]$Path, [string]$Argument) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             throw "GUI smoke timed out: $Path $Argument"
         }
+        $process.Refresh()
         if ($process.ExitCode -ne 0) {
-            $detail = (Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue).Trim()
+            $errText = [string](Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue)
+            $outText = [string](Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue)
+            $detail = ($errText + [Environment]::NewLine + $outText).Trim()
             throw "GUI smoke failed ($($process.ExitCode)): $Path $Argument $detail"
         }
         return Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue
@@ -62,6 +65,77 @@ function Find-MakeNsis {
         }
     }
     throw "makensis.exe not found. Install NSIS or omit -BuildInstaller."
+}
+
+function Find-MsvcCrtDir {
+    $roots = @()
+
+    if ($env:VCToolsRedistDir) {
+        $roots += $env:VCToolsRedistDir
+    }
+    if ($env:VCINSTALLDIR) {
+        $roots += (Join-Path $env:VCINSTALLDIR "Redist\MSVC")
+    }
+
+    $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+    if ($programFilesX86) {
+        $vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path -LiteralPath $vswhere) {
+            $vsInstall = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+            if ($vsInstall) {
+                $roots += (Join-Path $vsInstall "VC\Redist\MSVC")
+            }
+        }
+    }
+
+    foreach ($root in ($roots | Where-Object { $_ } | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+            continue
+        }
+
+        $versionRoots = @($root)
+        $versionRoots += @(
+            Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            Select-Object -ExpandProperty FullName
+        )
+
+        foreach ($versionRoot in $versionRoots) {
+            $x64 = Join-Path $versionRoot "x64"
+            if (-not (Test-Path -LiteralPath $x64 -PathType Container)) {
+                continue
+            }
+
+            $crt = Get-ChildItem -LiteralPath $x64 -Directory -Filter "Microsoft.VC*.CRT" -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending |
+                Select-Object -First 1
+            if ($crt) {
+                return $crt.FullName
+            }
+        }
+    }
+
+    throw "MSVC x64 CRT redistributable directory not found. Install the Visual C++ x64 build tools or set VCToolsRedistDir."
+}
+
+function Install-AppLocalMsvcRuntime([string]$Destination) {
+    $crtDir = Find-MsvcCrtDir
+    $dlls = @(Get-ChildItem -LiteralPath $crtDir -File -Filter "*.dll" -ErrorAction Stop)
+    if ($dlls.Count -eq 0) {
+        throw "MSVC CRT directory contained no DLLs: $crtDir"
+    }
+
+    Write-Host "Copying app-local MSVC runtime from $crtDir"
+    foreach ($dll in $dlls) {
+        Copy-Item -LiteralPath $dll.FullName -Destination $Destination -Force
+    }
+
+    foreach ($required in @("vcruntime140.dll", "msvcp140.dll")) {
+        $path = Join-Path $Destination $required
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "app-local MSVC runtime missing required file after copy: $required"
+        }
+    }
 }
 
 $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
@@ -123,11 +197,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "windeployqt failed with exit code $LASTEXITCODE"
 }
 
-foreach ($runtime in @("vcruntime140.dll", "msvcp140.dll")) {
-    if (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $qtExe) $runtime))) {
-        throw "windeployqt did not deploy required MSVC runtime: $runtime"
-    }
-}
+$stageBin = Split-Path -Parent $qtExe
+Install-AppLocalMsvcRuntime $stageBin
 
 Invoke-GuiSmoke $qtExe "--desktop-diagnostics" | Out-Null
 
