@@ -67,6 +67,7 @@ private:
     std::map<std::string, ProjectEventProjection> event_projections_;
     std::string selected_project_;
     std::string selected_task_id_;
+    std::string claude_linked_project_id_;
 
     QListWidget* project_list_ = nullptr;
     QLabel* claude_cli_state_ = nullptr;
@@ -81,6 +82,7 @@ private:
     QPushButton* claude_setup_ = nullptr;
     QPushButton* claude_config_ = nullptr;
     QPushButton* claude_usage_ = nullptr;
+    QPushButton* claude_project_ = nullptr;
     QPushButton* claude_workspace_ = nullptr;
     QPushButton* claude_transcript_ = nullptr;
 
