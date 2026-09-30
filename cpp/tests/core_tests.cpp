@@ -4,6 +4,7 @@
 #include "monitor_hub/claude_cli.hpp"
 
 #include <boost/json.hpp>
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include <fstream>
