@@ -18,6 +18,7 @@ The optional `monitor_hub_qt` target currently provides a read-only operational 
 - context-aware command copy and bounded diagnostic-context copy without execution;
 - Claude CLI sidebar card with local CLI/process detection;
 - zero-token Claude statusLine bridge for 5-hour / 7-day usage and reset-time display;
+- native `monitor_hub_cli --claude-statusline` bridge for installed packages, with the Python bridge retained as fallback;
 - cdesktop-detach rate-limit event fallback when no statusLine cache is available;
 - direct access to Claude config plus copyable `/usage` command;
 - Claude session/workspace/activity metadata from statusLine without rendering conversation text;
