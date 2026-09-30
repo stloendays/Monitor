@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 
 namespace fs = std::filesystem;
 namespace json = boost::json;
@@ -253,6 +254,31 @@ int main() {
            *claude.seven_day.used_percentage == 13.0);
     assert(claude.context_used_percentage &&
            *claude.context_used_percentage == 31.5);
+
+    // Native CLI statusLine bridge mirrors the Python compatibility bridge
+    // without persisting secret or free-form prompt/tool fields.
+    std::istringstream native_input(
+        R"({"version":"2.2.0","session_id":"native-session","session_name":"native-work","prompt_id":"native-prompt","transcript_path":"C:/demo/native.jsonl","model":{"id":"claude-opus","display_name":"Claude Opus"},"cwd":"C:/demo/native","workspace":{"project_dir":"C:/demo","git_worktree":"native-worktree","secret":"must-not-leak-workspace"},"agent":{"name":"native-agent","type":"general-purpose","prompt":"must-not-leak-agent-prompt"},"context_window":{"used_percentage":28.0},"cost":{"total_cost_usd":0.75},"rate_limits":{"five_hour":{"used_percentage":30.0,"resets_at":1788062400},"seven_day":{"used_percentage":10.0,"resets_at":1788580800}},"oauth_token":"must-not-leak-token","api_key":"must-not-leak-key"})");
+    std::ostringstream native_output;
+    std::string native_diagnostic;
+    assert(run_claude_statusline_bridge(
+               native_input,
+               native_output,
+               paths,
+               &native_diagnostic) == 0);
+    assert(native_diagnostic.empty());
+    assert(native_output.str().find("Claude Opus") != std::string::npos);
+    assert(native_output.str().find("5h 30%") != std::string::npos);
+    assert(native_output.str().find("7d 10%") != std::string::npos);
+
+    const auto native_saved = read_json(claude_status_file);
+    assert(native_saved && native_saved->is_object());
+    const auto native_serialized = json::serialize(*native_saved);
+    assert(native_serialized.find("native-session") != std::string::npos);
+    assert(native_serialized.find("native-agent") != std::string::npos);
+    assert(native_serialized.find("must-not-leak") == std::string::npos);
+    assert(native_serialized.find("oauth_token") == std::string::npos);
+    assert(native_serialized.find("api_key") == std::string::npos);
 
     // Fallback: background Claude stream-json can provide reset/utilization
     // without reading OAuth credentials when no statusLine cache exists.
