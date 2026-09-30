@@ -1,4 +1,5 @@
 #include "monitor_hub/core.hpp"
+#include "monitor_hub/claude_cli.hpp"
 #include "monitor_hub/notification_outbox.hpp"
 #include "monitor_hub/windows_probe.hpp"
 
@@ -16,6 +17,7 @@ int main(int argc, char** argv) {
         monitor_hub::SystemInfo system;
         bool system_fixture = false;
         bool dump = false;
+        bool claude_statusline = false;
         bool notifications = false;
         bool include_acknowledged = false;
         std::optional<std::string> acknowledge_id;
@@ -24,6 +26,7 @@ int main(int argc, char** argv) {
         for (int i = 1; i < argc; ++i) {
             const std::string arg = argv[i];
             if (arg == "--dump") dump = true;
+            else if (arg == "--claude-statusline") claude_statusline = true;
             else if (arg == "--notifications") notifications = true;
             else if (arg == "--notifications-all") {
                 notifications = true;
@@ -50,6 +53,7 @@ int main(int argc, char** argv) {
                     << "monitor_hub_cli ACTION [--registry FILE] [--hub-data DIR] [--job-root DIR] [--no-discovery] [--system-info FILE]\n"
                        "Actions:\n"
                        "  --dump                    Dump normalized Monitor Hub state as JSON.\n"
+                       "  --claude-statusline       Read Claude Code statusLine JSON from stdin, write a sanitized local snapshot, and print the compact status line.\n"
                        "  --notifications           Sync event streams into the durable outbox and list unacknowledged notifications.\n"
                        "  --notifications-all       Sync and list all notifications, including acknowledged records.\n"
                        "  --ack-notification ID     Acknowledge one durable notification.\n"
@@ -65,13 +69,26 @@ int main(int argc, char** argv) {
 
         const int actions =
             (dump ? 1 : 0) +
+            (claude_statusline ? 1 : 0) +
             (notifications ? 1 : 0) +
             (acknowledge_id ? 1 : 0);
         if (actions != 1) {
             std::cerr
-                << "choose exactly one action: --dump, --notifications, "
-                   "--notifications-all, or --ack-notification ID\n";
+                << "choose exactly one action: --dump, --claude-statusline, "
+                   "--notifications, --notifications-all, or --ack-notification ID\n";
             return 2;
+        }
+
+        if (claude_statusline) {
+            std::string diagnostic;
+            const int code = monitor_hub::run_claude_statusline_bridge(
+                std::cin,
+                std::cout,
+                paths,
+                &diagnostic);
+            if (!diagnostic.empty())
+                std::cerr << "monitor_hub_cli: claude statusLine: " << diagnostic << "\n";
+            return code;
         }
 
         if (notifications) {
