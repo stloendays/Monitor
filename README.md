@@ -1,5 +1,31 @@
 # Monitor · 监控总台
 
+## 下载与安装
+
+**推荐：从 GitHub Releases 下载最新 Windows 安装版。**
+
+[Download latest release](https://github.com/stloendays/Monitor/releases/latest)
+
+普通 Windows 用户请选择：
+
+`Monitor-Hub-<version>-win64-setup.exe`
+
+- Windows 10/11 x64；
+- 当前用户安装，不需要管理员权限；
+- 安装后可从开始菜单启动 Monitor Hub；
+- 安装器不会静默开启“开机自动启动”；
+- 卸载不会删除安装目录之外的项目/工作区数据。
+
+其他资产：
+
+- `Monitor-Hub-<version>-win64-portable.zip`：免安装便携版；
+- `monitor-hub-windows-x64.zip`：**自动更新内部包，不是普通用户推荐下载项**；
+- `SHA256SUMS.txt`：发布文件完整性校验。
+
+如果 Windows 出现 SmartScreen/信誉提示，请先确认文件来自本仓库官方 Release，并用 `SHA256SUMS.txt` 校验后再决定是否继续。
+
+详细说明：[Download and install](docs/DOWNLOAD_AND_INSTALL.md)
+
 一个 Windows 桌面小程序，把本机上所有长时间计算任务的监控集中到一个窗口里。任务可以在本机跑（机器学习训练、数据处理），也可以在 HPC 集群的 PBS 上跑（VASP 等）。在这个窗口里你可以：
 
 - **看完成情况**：每个项目一张卡片，状态一眼看清（⚠ 需要你处理 / ⟳ 后台处理中 / ● 正常 / ✔ 已完成 / ⏸ 已暂停）。进度表支持任务下钻：新格式监控提供 `row_meta` 后，双击一行可直接打开该任务目录、日志或结果文件。
@@ -27,9 +53,11 @@
 
 所以关掉总台不影响任何监控；把总台改写成别的语言，也不用改任何监控。详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
-## 运行
+## Qt 桌面版与旧版 Python 运行
 
-需要 Windows 10/11，Python 3.12（带 tkinter 和 pywin32），以及 Claude Code CLI（`claude.exe`）。
+**发布版推荐直接使用上面的 Windows Qt 安装包，不要求为了 GUI 额外安装 Python。**
+
+下面的 Python 启动方式保留用于旧版兼容、脚本开发和调试。旧版需要 Windows 10/11、Python 3.12（带 tkinter 和 pywin32），以及 Claude Code CLI（`claude.exe`）。
 
 ```
 copy hub\monitor_hub_projects.example.json hub\monitor_hub_projects.json   # 然后改成你的项目
@@ -71,22 +99,25 @@ docs/
 tests/                              演示数据、页面巡览截图、COM / 后台作业 / 适配器 / 新任务办理测试（见 tests/README.md）
 ```
 
-## 改写成 C++
+## C++ / Qt 实现
 
-计划用 C++（建议 Qt 6 + nlohmann/json + Task Scheduler COM + WMI）重写。[docs/PORTING_TO_CPP.md](docs/PORTING_TO_CPP.md) 给出了：
+当前主线已经迁移到 C++20 + Qt 6，并保留 Python 路径作为兼容/辅助工具。[docs/PORTING_TO_CPP.md](docs/PORTING_TO_CPP.md) 给出了：
 - 逐个函数的对照表；
 - 必须保留的行为（不闪窗、只读提问的参数、健康判定的优先级、界面配色和字号）；
 - 对照测试的方法：两个版本都在演示数据上运行 `--dump`，逐字段比较。
 
 ## 关于这个项目
 
-这个项目由 **Claude**（Anthropic 的 AI 助手；模型 Claude Opus 5.5，在 Claude Code 中运行）在 2026-09-28 按 Tony 的要求编写。起点是修复一个 QoI 计算监控脚本里的问题，后来一步步扩展成覆盖本机和 HPC 计算的通用监控总台。开发过程中踩过的坑都记录在 [docs/LESSONS_LEARNED.md](docs/LESSONS_LEARNED.md)，其中包括：
-- MSIX 虚拟化路径导致 venv 启动失败；
-- Windows Terminal 下定时任务闪窗；
-- 管道编码导致的乱码；
-- 所谓"只读"会话其实能写文件、能推送；
-- Claude 额度共享导致后台任务中断。
+Monitor Hub 起源于真实长时间计算任务的监控需求，现在定位为一个 **Windows 本地监控与 Agent 控制台**：
 
-所有功能都在作者的机器上实测过（截图、临时定时任务、临时后台作业、真实的后台 Claude 办理），测试脚本在 `tests/` 里。
+- 用统一状态模型展示本机/HPC 长任务；
+- 用 Issue / Event Timeline 记录问题、动作和恢复验证；
+- 把确定性自动化、子 Agent 和主 Agent/用户决策分成 L1/L2/L3 权限层；
+- 用 durable outbox 保证需要关注和项目完成事件不会只停留在瞬时 UI；
+- 通过 C++20 + Qt 6 桌面应用提供后台、托盘、设置、诊断、安装和发布体验。
 
-目前未指定开源许可证。
+项目仍保留 Python 组件用于兼容、适配和部分辅助流程，但正式 Windows 桌面 Release 以 C++/Qt 安装包为主。
+
+设计与开发过程中遇到的工程问题和迁移经验记录在 [docs/LESSONS_LEARNED.md](docs/LESSONS_LEARNED.md)，架构与协议说明位于 `docs/`。
+
+目前仓库未指定开源许可证；发布二进制不等同于授予额外的开源再分发权限。

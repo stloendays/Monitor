@@ -246,7 +246,7 @@ if (Test-Path -LiteralPath $iconSource) {
     Copy-Item -LiteralPath $iconSource -Destination $iconDestination -Force
 }
 
-foreach ($optional in @("README.md", "docs\DESKTOP_LIFECYCLE.md")) {
+foreach ($optional in @("README.md", "docs\DESKTOP_LIFECYCLE.md", "docs\DOWNLOAD_AND_INSTALL.md")) {
     $source = Join-Path $repo $optional
     if (Test-Path -LiteralPath $source) {
         $destination = Join-Path $stage $optional

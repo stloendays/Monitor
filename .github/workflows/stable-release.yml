@@ -1,0 +1,173 @@
+name: Stable Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'VERSION'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: monitor-hub-stable-release
+  cancel-in-progress: false
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release version
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($version -notmatch '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$') {
+            throw "VERSION is not SemVer: $version"
+          }
+          $notes = "docs/releases/v$version.md"
+          if (-not (Test-Path -LiteralPath $notes -PathType Leaf)) {
+            throw "release notes missing: $notes"
+          }
+          "MONITOR_HUB_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MONITOR_HUB_RELEASE_NOTES=$notes" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: cpp/vcpkg.json
+
+      - name: Install Qt 6
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check aqtinstall
+          python -m aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 -O "$env:RUNNER_TEMP\Qt"
+
+      - name: Configure release build
+        shell: pwsh
+        run: |
+          $qt = Join-Path $env:RUNNER_TEMP "Qt\6.8.3\msvc2022_64"
+          cmake -S cpp -B cpp/build-release -DMONITOR_HUB_BUILD_QT=ON -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DCMAKE_PREFIX_PATH="$qt"
+
+      - name: Build all release targets
+        run: cmake --build cpp/build-release --config Release
+
+      - name: Run CTest
+        run: ctest --test-dir cpp/build-release -C Release --output-on-failure
+
+      - name: Verify compiled version
+        shell: pwsh
+        run: |
+          $compiled = (.\cpp\build-release\Release\monitor_hub_cli.exe --version | Out-String).Trim()
+          if ($compiled -ne $env:MONITOR_HUB_VERSION) {
+            throw "compiled version mismatch: expected $env:MONITOR_HUB_VERSION, got $compiled"
+          }
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Build Windows release packages
+        shell: pwsh
+        run: |
+          $qt = Join-Path $env:RUNNER_TEMP "Qt\6.8.3\msvc2022_64\bin"
+          powershell -ExecutionPolicy Bypass -File packaging/windows/package_qt.ps1 -RepoRoot . -BuildDir cpp/build-release -QtBin "$qt" -OutDir dist -BuildInstaller
+
+      - name: Verify release package contract
+        shell: pwsh
+        run: |
+          $version = $env:MONITOR_HUB_VERSION
+          $stageVersion = (Get-Content .\dist\stage\VERSION -Raw).Trim()
+          if ($stageVersion -ne $version) { throw "staged VERSION mismatch" }
+
+          $verify = Join-Path $env:RUNNER_TEMP "MonitorHubReleaseVerify"
+          if (Test-Path $verify) { Remove-Item $verify -Recurse -Force }
+          Expand-Archive -LiteralPath .\dist\monitor-hub-windows-x64.zip -DestinationPath $verify
+          $manifest = Get-Content (Join-Path $verify "manifest.json") -Raw | ConvertFrom-Json
+          if ($manifest.format -ne 1) { throw "unsupported manifest format" }
+          if ($manifest.version -ne $version) { throw "manifest version mismatch" }
+          $marker = Get-Content (Join-Path $verify "payload\.monitor-hub-release.json") -Raw | ConvertFrom-Json
+          if ($marker.version -ne $version) { throw "release marker version mismatch" }
+          foreach ($entry in $manifest.files) {
+            $path = Join-Path (Join-Path $verify 'payload') ($entry.path -replace '/', '\')
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing payload file: $($entry.path)" }
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+            if ($hash -ne [string]$entry.sha256) { throw "hash mismatch: $($entry.path)" }
+          }
+
+      - name: Installed release smoke test
+        shell: pwsh
+        run: |
+          $version = $env:MONITOR_HUB_VERSION
+          $installer = ".\dist\Monitor-Hub-$version-win64-setup.exe"
+          $installDir = Join-Path $env:RUNNER_TEMP "MonitorHubStableRelease"
+          if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
+          $install = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "installer failed: $($install.ExitCode)" }
+          $installedExe = Join-Path $installDir "bin\monitor_hub_qt.exe"
+          if (-not (Test-Path -LiteralPath $installedExe)) { throw "installed executable missing" }
+          $diag = & $installedExe --desktop-diagnostics
+          if ($LASTEXITCODE -ne 0) { throw "installed diagnostics failed" }
+          $uninstaller = Join-Path $installDir "Uninstall.exe"
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "uninstaller failed: $($uninstall.ExitCode)" }
+
+      - name: Generate release checksums
+        shell: pwsh
+        run: |
+          $version = $env:MONITOR_HUB_VERSION
+          $assets = @(
+            ".\dist\Monitor-Hub-$version-win64-setup.exe",
+            ".\dist\Monitor-Hub-$version-win64-portable.zip",
+            ".\dist\monitor-hub-windows-x64.zip"
+          )
+          $lines = foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) { throw "release asset missing: $asset" }
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()
+            "$hash  $([System.IO.Path]::GetFileName($asset))"
+          }
+          $lines | Set-Content -LiteralPath .\dist\SHA256SUMS.txt -Encoding ascii
+
+      - name: Upload release build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-hub-stable-windows
+          path: |
+            dist/Monitor-Hub-*-win64-setup.exe
+            dist/Monitor-Hub-*-win64-portable.zip
+            dist/monitor-hub-windows-x64.zip
+            dist/monitor-hub-windows-x64.zip.sha256
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:MONITOR_HUB_VERSION
+          $tag = "v$version"
+          $notes = $env:MONITOR_HUB_RELEASE_NOTES
+
+          gh release view $tag --repo "${{ github.repository }}" --json isDraft,targetCommitish 2>$null | Out-Null
+          $exists = ($LASTEXITCODE -eq 0)
+          if ($exists) {
+            $info = gh release view $tag --repo "${{ github.repository }}" --json isDraft,targetCommitish | ConvertFrom-Json
+            if (-not $info.isDraft) { throw "release $tag already exists and is published" }
+          } else {
+            gh release create $tag --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Monitor Hub v$version" --notes-file $notes --draft
+            if ($LASTEXITCODE -ne 0) { throw "failed to create draft release $tag" }
+          }
+
+          gh release upload $tag --repo "${{ github.repository }}" --clobber `
+            ".\dist\Monitor-Hub-$version-win64-setup.exe" `
+            ".\dist\Monitor-Hub-$version-win64-portable.zip" `
+            ".\dist\monitor-hub-windows-x64.zip" `
+            ".\dist\monitor-hub-windows-x64.zip.sha256" `
+            ".\dist\SHA256SUMS.txt"
+          if ($LASTEXITCODE -ne 0) { throw "failed to upload release assets" }
+
+          gh release edit $tag --repo "${{ github.repository }}" --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw "failed to publish release $tag" }

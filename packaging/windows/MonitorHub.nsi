@@ -20,8 +20,15 @@ InstallDirRegKey HKCU "Software\Monitor\MonitorHubInstaller" "InstallDir"
 SetCompressor /SOLID lzma
 ShowInstDetails show
 ShowUnInstDetails show
+BrandingText "Monitor Hub · Local monitoring and agent control"
 
 !define MUI_ABORTWARNING
+!define MUI_WELCOMEPAGE_TITLE "Monitor Hub ${VERSION}"
+!define MUI_WELCOMEPAGE_TEXT "Install Monitor Hub, a local monitoring and policy-bounded agent-control console.$\r$\n$\r$\nThis per-user installation does not require administrator permission and does not silently enable launch-at-login.$\r$\n$\r$\nYour external project/workspace data is not managed by this installer."
+!define MUI_FINISHPAGE_TITLE "Monitor Hub ${VERSION} is ready"
+!define MUI_FINISHPAGE_TEXT "Installation is complete.$\r$\n$\r$\nUse the Start Menu or the option below to launch Monitor Hub. If close-to-tray is enabled later, closing the main window can keep monitoring visible from the system tray."
+!define MUI_FINISHPAGE_RUN "$INSTDIR\bin\monitor_hub_qt.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Launch Monitor Hub"
 !define MUI_ICON "${STAGE_DIR}\resources\monitor_hub.ico"
 !define MUI_UNICON "${STAGE_DIR}\resources\monitor_hub.ico"
 
@@ -44,7 +51,7 @@ Section "Monitor Hub" SEC_MAIN
   WriteRegStr HKCU "Software\Monitor\MonitorHubInstaller" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "DisplayName" "Monitor Hub"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "Publisher" "Monitor"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "Publisher" "Monitor Hub"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "DisplayIcon" "$INSTDIR\bin\monitor_hub_qt.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonitorHub" "UninstallString" '"$INSTDIR\Uninstall.exe"'
