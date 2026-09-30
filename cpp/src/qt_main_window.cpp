@@ -160,10 +160,10 @@ void QtMainWindow::build_ui() {
     area_ = new QLabel(header);
     title_line->addWidget(area_);
     title_line->addStretch();
-    auto* refresh = new QPushButton(QStringLiteral("立即刷新"), header);
-    refresh->setToolTip(QStringLiteral("重新读取 Task Scheduler、WMI 进程和状态文件；不会启动、停止或修改计算任务。"));
-    title_line->addWidget(refresh);
-    connect(refresh, &QPushButton::clicked, this, [this] { refresh(); });
+    auto* refresh_button = new QPushButton(QStringLiteral("立即刷新"), header);
+    refresh_button->setToolTip(QStringLiteral("重新读取 Task Scheduler、WMI 进程和状态文件；不会启动、停止或修改计算任务。"));
+    title_line->addWidget(refresh_button);
+    connect(refresh_button, &QPushButton::clicked, this, [this] { this->refresh(); });
     header_layout->addLayout(title_line);
 
     auto* state_line = new QHBoxLayout();
