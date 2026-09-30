@@ -1223,9 +1223,9 @@ void QtMainWindow::copy_debug_summary() {
         if (!value.empty()) lines << pair.second + QStringLiteral("=") + q(value);
     }
 
-    lines << QStringLiteral("registry=%1").arg(QString::fromStdWString(paths_.registry.wstring()));
-    lines << QStringLiteral("hub_data=%1").arg(QString::fromStdWString(paths_.hub_data.wstring()));
-    lines << QStringLiteral("job_root=%1").arg(QString::fromStdWString(paths_.job_root.wstring()));
+    lines << QStringLiteral("registry=%1").arg(q(paths_.registry.string()));
+    lines << QStringLiteral("hub_data=%1").arg(q(paths_.hub_data.string()));
+    lines << QStringLiteral("job_root=%1").arg(q(paths_.job_root.string()));
 
     if (const auto* meta = selected_task_meta()) {
         const auto task_id = s(meta->if_contains("task_id"));
