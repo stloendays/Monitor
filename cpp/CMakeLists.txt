@@ -9,6 +9,7 @@ find_package(Boost 1.82 REQUIRED)
 
 add_library(monitor_hub_core
     src/core.cpp
+    src/command_control.cpp
     src/event_store.cpp
     src/overview.cpp
     src/notification_outbox.cpp
@@ -34,6 +35,10 @@ endif()
 add_executable(monitor_hub_cli src/main.cpp)
 target_link_libraries(monitor_hub_cli PRIVATE monitor_hub_core)
 install(TARGETS monitor_hub_cli RUNTIME DESTINATION bin)
+
+add_executable(monitor_hub_control src/control_main.cpp)
+target_link_libraries(monitor_hub_control PRIVATE monitor_hub_core)
+install(TARGETS monitor_hub_control RUNTIME DESTINATION bin)
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/../hub/claude_statusline_bridge.py"
     DESTINATION share/monitor_hub
@@ -86,4 +91,17 @@ if(BUILD_TESTING)
     add_executable(monitor_hub_core_tests tests/core_tests.cpp)
     target_link_libraries(monitor_hub_core_tests PRIVATE monitor_hub_core)
     add_test(NAME monitor_hub_core_tests COMMAND monitor_hub_core_tests)
+
+    add_executable(
+        monitor_hub_command_control_tests
+        tests/command_control_tests.cpp
+    )
+    target_link_libraries(
+        monitor_hub_command_control_tests
+        PRIVATE monitor_hub_core
+    )
+    add_test(
+        NAME monitor_hub_command_control_tests
+        COMMAND monitor_hub_command_control_tests
+    )
 endif()

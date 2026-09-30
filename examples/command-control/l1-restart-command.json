@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "command_id": "cmd_example_restart_001",
+  "command_type": "task.restart.requested",
+  "requested_at": "2026-09-30T12:00:00+08:00",
+  "project_id": "example-project",
+  "task_id": "task-001",
+  "issue_id": "iss-task-001",
+  "correlation_id": "corr-task-001",
+  "requested_by": {
+    "kind": "monitor",
+    "id": "example-project__monitor__local__15m"
+  },
+  "authority": "L1",
+  "policy_ref": "policies/example-project-recovery-v1",
+  "constraints": [
+    "do not change scientific parameters"
+  ],
+  "completion_criteria": [
+    "replacement job is observed by the monitor"
+  ],
+  "context_refs": [
+    "D:/Research/Example/task-001/OUTCAR",
+    "D:/Research/Example/task-001/OSZICAR"
+  ],
+  "payload": {
+    "action_id": "restart_same_parameters"
+  }
+}
