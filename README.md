@@ -108,13 +108,16 @@ tests/                              演示数据、页面巡览截图、COM / �
 
 ## 关于这个项目
 
-这个项目由 **Claude**（Anthropic 的 AI 助手；模型 Claude Opus 5.5，在 Claude Code 中运行）在 2026-09-28 按 Tony 的要求编写。起点是修复一个 QoI 计算监控脚本里的问题，后来一步步扩展成覆盖本机和 HPC 计算的通用监控总台。开发过程中踩过的坑都记录在 [docs/LESSONS_LEARNED.md](docs/LESSONS_LEARNED.md)，其中包括：
-- MSIX 虚拟化路径导致 venv 启动失败；
-- Windows Terminal 下定时任务闪窗；
-- 管道编码导致的乱码；
-- 所谓"只读"会话其实能写文件、能推送；
-- Claude 额度共享导致后台任务中断。
+Monitor Hub 起源于真实长时间计算任务的监控需求，现在定位为一个 **Windows 本地监控与 Agent 控制台**：
 
-所有功能都在作者的机器上实测过（截图、临时定时任务、临时后台作业、真实的后台 Claude 办理），测试脚本在 `tests/` 里。
+- 用统一状态模型展示本机/HPC 长任务；
+- 用 Issue / Event Timeline 记录问题、动作和恢复验证；
+- 把确定性自动化、子 Agent 和主 Agent/用户决策分成 L1/L2/L3 权限层；
+- 用 durable outbox 保证需要关注和项目完成事件不会只停留在瞬时 UI；
+- 通过 C++20 + Qt 6 桌面应用提供后台、托盘、设置、诊断、安装和发布体验。
 
-目前未指定开源许可证。
+项目仍保留 Python 组件用于兼容、适配和部分辅助流程，但正式 Windows 桌面 Release 以 C++/Qt 安装包为主。
+
+设计与开发过程中遇到的工程问题和迁移经验记录在 [docs/LESSONS_LEARNED.md](docs/LESSONS_LEARNED.md)，架构与协议说明位于 `docs/`。
+
+目前仓库未指定开源许可证；发布二进制不等同于授予额外的开源再分发权限。
