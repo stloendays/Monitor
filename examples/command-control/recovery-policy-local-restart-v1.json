@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "policy_id": "example-local-restart-v1",
+  "project_id": "example-project",
+  "actions": [
+    {
+      "action_id": "restart_local_same_parameters",
+      "authority": "L1",
+      "dispatch_kind": "deterministic",
+      "handler": "local_process_restart_v1",
+      "handler_config": {
+        "program": "C:/MonitorAdapters/restart-wrapper.exe",
+        "arguments": [
+          "--resume",
+          "C:/Research/Example/checkpoint.json"
+        ],
+        "working_directory": "C:/Research/Example"
+      },
+      "allowed_command_types": [
+        "task.restart.requested"
+      ],
+      "constraints": [
+        "program and arguments are fixed by policy",
+        "reuse validated checkpoint",
+        "do not change scientific parameters",
+        "do not delete existing outputs"
+      ],
+      "completion_criteria": [
+        "pre-authorized restart process is launched",
+        "monitor later observes replacement execution"
+      ],
+      "enabled": true
+    }
+  ]
+}
