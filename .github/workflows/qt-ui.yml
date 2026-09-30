@@ -43,6 +43,17 @@ jobs:
       - name: Desktop CLI smoke test
         shell: pwsh
         run: |
+          $qtRoot = Join-Path $env:RUNNER_TEMP "Qt\6.8.3\msvc2022_64"
+          $qtBin = Join-Path $qtRoot "bin"
+          $env:PATH = "$qtBin;$env:PATH"
+          $env:QT_PLUGIN_PATH = Join-Path $qtRoot "plugins"
+
+          function Read-SmokeText([string]$Path) {
+            $value = Get-Content $Path -Raw -ErrorAction SilentlyContinue
+            if ($null -eq $value) { return "" }
+            return $value.Trim()
+          }
+
           function Invoke-GuiSmoke([string]$Path, [string]$Argument) {
             $stdout = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
             $stderr = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
@@ -52,9 +63,11 @@ jobs:
                 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
                 throw "GUI smoke timed out: $Argument"
               }
+              $p.Refresh()
               if ($p.ExitCode -ne 0) {
-                $detail = (Get-Content $stderr -Raw -ErrorAction SilentlyContinue).Trim()
-                throw "GUI smoke failed ($($p.ExitCode)): $Argument $detail"
+                $out = Read-SmokeText $stdout
+                $err = Read-SmokeText $stderr
+                throw "GUI smoke failed ($($p.ExitCode)): $Argument stdout=[$out] stderr=[$err]"
               }
             } finally {
               Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
@@ -100,6 +113,12 @@ jobs:
       - name: Installed package smoke test
         shell: pwsh
         run: |
+          function Read-SmokeText([string]$Path) {
+            $value = Get-Content $Path -Raw -ErrorAction SilentlyContinue
+            if ($null -eq $value) { return "" }
+            return $value.Trim()
+          }
+
           function Invoke-GuiSmoke([string]$Path, [string]$Argument) {
             $stdout = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
             $stderr = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
@@ -109,9 +128,11 @@ jobs:
                 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
                 throw "GUI smoke timed out: $Path $Argument"
               }
+              $p.Refresh()
               if ($p.ExitCode -ne 0) {
-                $detail = (Get-Content $stderr -Raw -ErrorAction SilentlyContinue).Trim()
-                throw "GUI smoke failed ($($p.ExitCode)): $Path $Argument $detail"
+                $out = Read-SmokeText $stdout
+                $err = Read-SmokeText $stderr
+                throw "GUI smoke failed ($($p.ExitCode)): $Path $Argument stdout=[$out] stderr=[$err]"
               }
             } finally {
               Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
