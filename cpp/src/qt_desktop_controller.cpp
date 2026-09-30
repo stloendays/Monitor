@@ -37,6 +37,14 @@ QString q(const std::string& value) {
         static_cast<qsizetype>(value.size()));
 }
 
+QString qpath(const fs::path& path) {
+#ifdef Q_OS_WIN
+    return QString::fromStdWString(path.wstring());
+#else
+    return q(path.string());
+#endif
+}
+
 bool needs_attention(const std::string& health) {
     return health == "attention" || health == "error" || health == "stale";
 }
@@ -448,11 +456,11 @@ void QtDesktopController::start_control_tick() {
     arguments
         << QStringLiteral("--tick")
         << QStringLiteral("--hub-data")
-        << q(paths.hub_data.string())
+        << qpath(paths.hub_data)
         << QStringLiteral("--registry")
-        << q(paths.registry.string())
+        << qpath(paths.registry)
         << QStringLiteral("--job-root")
-        << q(paths.job_root.string());
+        << qpath(paths.job_root);
 
     process->setProgram(program);
     process->setArguments(arguments);
@@ -542,8 +550,11 @@ void QtDesktopController::start_control_tick() {
             control_failure_active_ = false;
             if (needs_main_agent) {
                 set_control_status(
-                    QStringLiteral("自动处理：等待决策 %1")
-                        .arg(pending));
+                    settings_.automatic_control
+                        ? QStringLiteral("自动处理：等待决策 %1")
+                              .arg(pending)
+                        : QStringLiteral("自动处理：已暂停 · 待决策 %1")
+                              .arg(pending));
                 if (!previous_needs_main_agent_ &&
                     settings_.notifications &&
                     tray_available() &&
@@ -560,7 +571,9 @@ void QtDesktopController::start_control_tick() {
                 }
             } else {
                 set_control_status(
-                    QStringLiteral("自动处理：运行正常"));
+                    settings_.automatic_control
+                        ? QStringLiteral("自动处理：运行正常")
+                        : QStringLiteral("自动处理：已暂停"));
             }
             previous_needs_main_agent_ = needs_main_agent;
 
