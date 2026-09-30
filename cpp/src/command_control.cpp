@@ -223,22 +223,38 @@ std::string safe_filename(const std::string& value) {
     return safe + "-" + suffix.str() + ".json";
 }
 
+bool safe_project_id(const std::string& project_id) {
+    if (project_id.empty()) return false;
+    return std::all_of(
+        project_id.begin(),
+        project_id.end(),
+        [](const unsigned char ch) {
+            return std::isalnum(ch) ||
+                   ch == '-' || ch == '_' || ch == '.';
+        });
+}
+
 bool safe_policy_ref(const std::string& policy_ref) {
-    if (policy_ref.empty()) return false;
+    if (policy_ref.empty() ||
+        policy_ref.find('\\') != std::string::npos)
+        return false;
+
     const fs::path path(policy_ref);
     if (path.is_absolute()) return false;
 
+    std::size_t meaningful_parts = 0;
     bool first = true;
     for (const auto& part : path) {
         const auto text = part.string();
         if (text.empty() || text == ".") continue;
         if (text == "..") return false;
+        ++meaningful_parts;
         if (first) {
             if (text != "policies") return false;
             first = false;
         }
     }
-    return !first;
+    return !first && meaningful_parts >= 2;
 }
 
 fs::path resolve_policy_path(
@@ -675,6 +691,8 @@ std::optional<CommandEnvelope> parse_command_envelope(
         error = "missing requested_at";
     else if (command.project_id.empty())
         error = "missing project_id";
+    else if (!safe_project_id(command.project_id))
+        error = "project_id must be a filesystem-safe stable ID";
     else if (!requested_by ||
              command.requested_by_kind.empty() ||
              command.requested_by_id.empty())
