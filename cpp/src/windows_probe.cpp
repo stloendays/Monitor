@@ -361,3 +361,38 @@ SystemInfo probe_system_info() {
 }  // namespace monitor_hub
 
 #endif
+
+
+namespace monitor_hub {
+
+json::object system_info_json(const SystemInfo& system) {
+    json::object tasks;
+    for (const auto& [name, task] : system.tasks) {
+        json::object row;
+        row["name"] = task.name;
+        row["state"] = task.state;
+        row["last"] = task.last;
+        row["result"] = task.result;
+        row["next"] = task.next;
+        row["interval"] = task.interval;
+        row["action"] = task.action;
+        tasks[name] = std::move(row);
+    }
+
+    json::array processes;
+    for (const auto& process : system.procs) {
+        json::object row;
+        row["pid"] = process.pid;
+        row["name"] = process.name;
+        row["cmd"] = process.cmd;
+        processes.emplace_back(std::move(row));
+    }
+
+    json::object out;
+    out["tasks"] = std::move(tasks);
+    out["procs"] = std::move(processes);
+    out["error"] = system.error;
+    return out;
+}
+
+}  // namespace monitor_hub
