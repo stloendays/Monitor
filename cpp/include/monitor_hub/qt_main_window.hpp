@@ -34,6 +34,10 @@ public:
 
     std::vector<QtDesktopProjectState> desktop_project_states() const;
     const RuntimePaths& runtime_paths() const noexcept { return paths_; }
+    void focus_project(const std::string& project_id);
+    void focus_issue(
+        const std::string& project_id,
+        const std::string& issue_id);
 
 private:
     void build_ui();
