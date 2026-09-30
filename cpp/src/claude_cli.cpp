@@ -84,8 +84,24 @@ void read_statusline_snapshot(const json::object& root,
         status.model = str(model->if_contains("display_name"));
         if (status.model.empty()) status.model = str(model->if_contains("id"));
     }
-    if (const auto* workspace = object(root.if_contains("workspace")))
+    if (const auto* workspace = object(root.if_contains("workspace"))) {
         status.cwd = str(workspace->if_contains("current_dir"));
+        status.project_dir = str(workspace->if_contains("project_dir"));
+        status.git_worktree = str(workspace->if_contains("git_worktree"));
+    }
+
+    if (const auto* session = object(root.if_contains("session"))) {
+        status.session_id = str(session->if_contains("id"));
+        status.session_name = str(session->if_contains("name"));
+        status.prompt_id = str(session->if_contains("prompt_id"));
+        const auto transcript = str(session->if_contains("transcript_path"));
+        if (!transcript.empty()) status.transcript_path = transcript;
+    }
+
+    if (const auto* agent = object(root.if_contains("agent"))) {
+        status.agent_name = str(agent->if_contains("name"));
+        status.agent_type = str(agent->if_contains("type"));
+    }
 
     if (const auto* context = object(root.if_contains("context_window")))
         status.context_used_percentage =
@@ -122,6 +138,82 @@ std::string read_tail(const std::filesystem::path& path,
     std::string data(static_cast<std::size_t>(size - start), '\0');
     in.read(data.data(), static_cast<std::streamsize>(data.size()));
     return data;
+}
+
+std::optional<double> transcript_event_time(const json::object& root) {
+    if (const auto text = str(root.if_contains("timestamp")); !text.empty()) {
+        if (const auto parsed = parse_iso_local_seconds(text)) return parsed;
+    }
+    if (const auto value = number(root.if_contains("timestamp"))) return value;
+    if (const auto value = number(root.if_contains("time"))) return value;
+    return std::nullopt;
+}
+
+void capture_tool_block(const json::object& block,
+                        const std::optional<double>& event_time,
+                        ClaudeCliStatus& status) {
+    if (str(block.if_contains("type")) != "tool_use") return;
+    const auto name = str(block.if_contains("name"));
+    if (name.empty()) return;
+
+    if (status.recent_tool.empty()) {
+        status.recent_tool = name;
+        status.recent_tool_at = event_time;
+    }
+
+    if (status.recent_agent.empty() && (name == "Agent" || name == "Task")) {
+        status.recent_agent = name;
+        if (const auto* input = object(block.if_contains("input"))) {
+            const auto subtype = str(input->if_contains("subagent_type"));
+            if (!subtype.empty()) status.recent_agent += " · " + subtype;
+        }
+        status.recent_agent_at = event_time;
+    }
+}
+
+void read_recent_transcript_activity(ClaudeCliStatus& status) {
+    if (status.transcript_path.empty() || !path_exists(status.transcript_path)) return;
+
+    const auto text = read_tail(status.transcript_path, 600000);
+    if (text.empty()) return;
+
+    std::vector<std::string> lines;
+    std::istringstream input(text);
+    for (std::string line; std::getline(input, line);)
+        if (!line.empty()) lines.push_back(std::move(line));
+
+    for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
+        boost::system::error_code parse_error;
+        auto parsed = json::parse(*it, parse_error);
+        if (parse_error || !parsed.is_object()) continue;
+
+        const auto& root = parsed.as_object();
+        const auto event_time = transcript_event_time(root);
+
+        if (str(root.if_contains("type")) == "tool_use")
+            capture_tool_block(root, event_time, status);
+
+        const json::object* message = object(root.if_contains("message"));
+        const json::value* content = message
+            ? message->if_contains("content")
+            : root.if_contains("content");
+
+        if (content && content->is_array()) {
+            const auto& blocks = content->as_array();
+            for (auto bit = blocks.rbegin(); bit != blocks.rend(); ++bit) {
+                if (!bit->is_object()) continue;
+                capture_tool_block(bit->as_object(), event_time, status);
+                if (!status.recent_tool.empty() && !status.recent_agent.empty()) break;
+            }
+        }
+
+        if (!status.recent_tool.empty() && !status.recent_agent.empty()) return;
+    }
+
+    if (!status.recent_tool.empty() && !status.recent_tool_at)
+        status.recent_tool_at = mtime_seconds(status.transcript_path);
+    if (!status.recent_agent.empty() && !status.recent_agent_at)
+        status.recent_agent_at = mtime_seconds(status.transcript_path);
 }
 
 void read_stream_rate_limit(const json::object& event,
@@ -254,6 +346,7 @@ ClaudeCliStatus load_claude_cli_status(
         root && root->is_object()) {
         read_statusline_snapshot(root->as_object(), status);
         status.observed_at = parse_observed_at(root->as_object(), status.status_file);
+        read_recent_transcript_activity(status);
         return status;
     }
 
