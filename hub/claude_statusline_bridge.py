@@ -65,11 +65,19 @@ def _sanitize(payload: dict) -> dict:
     five = _usage_window(limits, "five_hour")
     seven = _usage_window(limits, "seven_day")
 
+    agent = _object(payload.get("agent"))
+
     snapshot = {
         "schema_version": 1,
         "source": "claude_statusline",
         "captured_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "version": str(payload.get("version") or ""),
+        "session": {
+            "id": str(payload.get("session_id") or ""),
+            "name": str(payload.get("session_name") or ""),
+            "prompt_id": str(payload.get("prompt_id") or ""),
+            "transcript_path": str(payload.get("transcript_path") or ""),
+        },
         "model": {
             "id": str(model.get("id") or ""),
             "display_name": str(model.get("display_name") or model.get("id") or ""),
@@ -77,6 +85,11 @@ def _sanitize(payload: dict) -> dict:
         "workspace": {
             "current_dir": str(workspace.get("current_dir") or payload.get("cwd") or ""),
             "project_dir": str(workspace.get("project_dir") or ""),
+            "git_worktree": str(workspace.get("git_worktree") or ""),
+        },
+        "agent": {
+            "name": str(agent.get("name") or ""),
+            "type": str(agent.get("type") or ""),
         },
         "context_window": {},
         "cost": {},

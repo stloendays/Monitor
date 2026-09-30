@@ -11,15 +11,17 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDir>
 #include <QFontDatabase>
 #include <QFrame>
 #include <QHeaderView>
 #include <QLabel>
+#include <limits>
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPixmap>
-#include <QProcess>
 #include <QProgressBar>
+#include <QProcess>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTableWidget>
@@ -66,6 +68,21 @@ const json::object* object(const json::value* v) {
 
 const json::array* array(const json::value* v) {
     return v && v->is_array() ? &v->as_array() : nullptr;
+}
+
+QString normalized_path_key(const std::string& value) {
+    if (value.empty()) return {};
+    auto path = QDir::cleanPath(q(value));
+    path.replace('\\', '/');
+    while (path.size() > 1 && path.endsWith('/')) path.chop(1);
+    return path;
+}
+
+bool paths_related(const QString& lhs, const QString& rhs) {
+    if (lhs.isEmpty() || rhs.isEmpty()) return false;
+    if (lhs.compare(rhs, Qt::CaseInsensitive) == 0) return true;
+    return lhs.startsWith(rhs + QStringLiteral("/"), Qt::CaseInsensitive) ||
+           rhs.startsWith(lhs + QStringLiteral("/"), Qt::CaseInsensitive);
 }
 
 QString health_text(const std::string& health) {
@@ -181,6 +198,21 @@ QString observed_text(const std::optional<double>& epoch) {
     const auto seconds = static_cast<qint64>(*epoch);
     const auto when = QDateTime::fromSecsSinceEpoch(seconds).toLocalTime();
     return QStringLiteral("数据更新 %1").arg(when.toString(QStringLiteral("MM-dd HH:mm:ss")));
+}
+
+QString activity_time_text(const std::optional<double>& epoch) {
+    if (!epoch) return QStringLiteral("时间未知");
+    const auto when = QDateTime::fromSecsSinceEpoch(
+        static_cast<qint64>(*epoch)).toLocalTime();
+    const auto now = QDateTime::currentDateTime();
+    const auto age = when.secsTo(now);
+    if (age >= 0 && age < 60)
+        return QStringLiteral("刚刚");
+    if (age >= 0 && age < 3600)
+        return QStringLiteral("%1 分钟前").arg((age + 59) / 60);
+    if (when.date() == now.date())
+        return QStringLiteral("今天 %1").arg(when.toString(QStringLiteral("HH:mm")));
+    return when.toString(QStringLiteral("MM-dd HH:mm"));
 }
 
 QString claude_bridge_path() {
@@ -353,6 +385,16 @@ void QtMainWindow::build_ui() {
     claude_cli_meta_->setWordWrap(true);
     claude_layout->addWidget(claude_cli_meta_);
 
+    claude_session_ = new QLabel(claude_card);
+    claude_session_->setObjectName(QStringLiteral("claudeSession"));
+    claude_session_->setWordWrap(true);
+    claude_layout->addWidget(claude_session_);
+
+    claude_activity_ = new QLabel(claude_card);
+    claude_activity_->setObjectName(QStringLiteral("claudeActivity"));
+    claude_activity_->setWordWrap(true);
+    claude_layout->addWidget(claude_activity_);
+
     claude_five_text_ = new QLabel(QStringLiteral("5 小时 · 等待数据"), claude_card);
     claude_five_text_->setObjectName(QStringLiteral("usageText"));
     claude_layout->addWidget(claude_five_text_);
@@ -395,6 +437,26 @@ void QtMainWindow::build_ui() {
     claude_actions->addStretch();
     claude_layout->addLayout(claude_actions);
 
+    auto* claude_session_actions = new QHBoxLayout();
+    claude_session_actions->setSpacing(5);
+    claude_project_ = new QPushButton(QStringLiteral("关联项目"), claude_card);
+    claude_project_->setProperty("role", QStringLiteral("quick"));
+    claude_project_->setToolTip(
+        QStringLiteral("根据 Claude project_dir/cwd 与 Monitor 项目路径自动匹配；匹配后跳到对应项目。"));
+    claude_workspace_ = new QPushButton(QStringLiteral("工作目录"), claude_card);
+    claude_workspace_->setProperty("role", QStringLiteral("quick"));
+    claude_workspace_->setToolTip(
+        QStringLiteral("打开当前 Claude 会话的 project_dir / cwd。"));
+    claude_transcript_ = new QPushButton(QStringLiteral("会话记录"), claude_card);
+    claude_transcript_->setProperty("role", QStringLiteral("quick"));
+    claude_transcript_->setToolTip(
+        QStringLiteral("打开 Claude Code 当前会话 transcript 文件。Monitor Hub 只读取尾部工具调用元数据，不展示对话正文。"));
+    claude_session_actions->addWidget(claude_project_);
+    claude_session_actions->addWidget(claude_workspace_);
+    claude_session_actions->addWidget(claude_transcript_);
+    claude_session_actions->addStretch();
+    claude_layout->addLayout(claude_session_actions);
+
     connect(claude_setup_, &QPushButton::clicked, this, [this] {
         copy_claude_statusline_setup();
     });
@@ -405,6 +467,21 @@ void QtMainWindow::build_ui() {
         QApplication::clipboard()->setText(QStringLiteral("/usage"));
         if (claude_updated_) claude_updated_->setText(QStringLiteral("已复制 /usage"));
         QTimer::singleShot(2200, this, [this] { render_claude_cli_status(); });
+    });
+    connect(claude_project_, &QPushButton::clicked, this, [this] {
+        if (claude_linked_project_id_.empty()) return;
+        select_project(claude_linked_project_id_);
+        if (tabs_) tabs_->setCurrentIndex(1);
+    });
+    connect(claude_workspace_, &QPushButton::clicked, this, [this] {
+        const auto status = load_claude_cli_status(system_, paths_);
+        const auto path = !status.project_dir.empty() ? status.project_dir : status.cwd;
+        if (!path.empty()) open_local(path);
+    });
+    connect(claude_transcript_, &QPushButton::clicked, this, [this] {
+        const auto status = load_claude_cli_status(system_, paths_);
+        if (!status.transcript_path.empty())
+            open_local(status.transcript_path.string());
     });
 
     side_layout->addWidget(claude_card);
@@ -1078,11 +1155,20 @@ void QtMainWindow::render_claude_cli_status() {
     const auto status = load_claude_cli_status(system_, paths_);
 
     QString state;
-    if (!status.source.empty()) {
-        state = status.running_processes > 0
-            ? QStringLiteral("● 已连接")
-            : QStringLiteral("● 已接入");
-    } else if (status.cli_found || status.running_processes > 0) {
+    const auto now_epoch = QDateTime::currentSecsSinceEpoch();
+    const auto observed_age = status.observed_at
+        ? now_epoch - static_cast<qint64>(*status.observed_at)
+        : std::numeric_limits<qint64>::max();
+    if (!status.source.empty() && status.running_processes > 0 &&
+        observed_age >= 0 && observed_age <= 120) {
+        state = QStringLiteral("● 正在工作");
+    } else if (!status.source.empty() && observed_age >= 0 && observed_age <= 600) {
+        state = QStringLiteral("◐ 最近活动");
+    } else if (status.running_processes > 0) {
+        state = QStringLiteral("○ CLI 运行中");
+    } else if (!status.source.empty()) {
+        state = QStringLiteral("○ 已缓存");
+    } else if (status.cli_found) {
         state = QStringLiteral("○ 待接用量");
     } else {
         state = QStringLiteral("○ 未发现");
@@ -1099,6 +1185,79 @@ void QtMainWindow::render_claude_cli_status() {
     if (meta.isEmpty())
         meta << QStringLiteral("等待 Claude CLI");
     claude_cli_meta_->setText(meta.join(QStringLiteral(" · ")));
+
+    QString session_text;
+    if (!status.session_name.empty()) {
+        session_text = QStringLiteral("会话 · %1").arg(q(status.session_name));
+    } else if (!status.session_id.empty()) {
+        auto short_id = q(status.session_id);
+        if (short_id.size() > 12) short_id = short_id.left(12) + QStringLiteral("…");
+        session_text = QStringLiteral("会话 · %1").arg(short_id);
+    } else {
+        session_text = QStringLiteral("会话 · 等待 statusLine 元数据");
+    }
+    if (!status.agent_name.empty())
+        session_text += QStringLiteral(" · Agent %1").arg(q(status.agent_name));
+    else if (!status.agent_type.empty())
+        session_text += QStringLiteral(" · Agent %1").arg(q(status.agent_type));
+    claude_session_->setText(session_text);
+
+    QStringList activity;
+    const auto workspace = !status.project_dir.empty() ? status.project_dir : status.cwd;
+    claude_linked_project_id_.clear();
+    QString linked_project_name;
+    qsizetype linked_score = -1;
+    const auto workspace_key = normalized_path_key(workspace);
+    if (!workspace_key.isEmpty()) {
+        for (const auto& project : projects_) {
+            const auto id = s(project.if_contains("id"));
+            if (id.empty()) continue;
+
+            std::vector<std::string> candidates;
+            for (const auto* key : {"dir", "qa_cwd"}) {
+                const auto value = s(project.if_contains(key));
+                if (!value.empty()) candidates.push_back(value);
+            }
+            if (const auto* runner = object(project.if_contains("runner"))) {
+                const auto workdir = s(runner->if_contains("workdir"));
+                if (!workdir.empty()) candidates.push_back(workdir);
+            }
+            for (const auto* key : {"status_json", "status_md"}) {
+                const auto value = s(project.if_contains(key));
+                if (value.empty()) continue;
+                const auto parent = QFileInfo(q(value)).absolutePath();
+                if (!parent.isEmpty()) candidates.push_back(parent.toUtf8().toStdString());
+            }
+
+            for (const auto& candidate : candidates) {
+                const auto candidate_key = normalized_path_key(candidate);
+                if (!paths_related(workspace_key, candidate_key)) continue;
+                const auto score = candidate_key.size();
+                if (score <= linked_score) continue;
+                linked_score = score;
+                claude_linked_project_id_ = id;
+                linked_project_name = q(s(project.if_contains("name"), id));
+            }
+        }
+    }
+
+    if (!workspace.empty())
+        activity << QStringLiteral("目录 %1").arg(q(workspace));
+    if (!linked_project_name.isEmpty())
+        activity << QStringLiteral("关联 Monitor 项目 %1").arg(linked_project_name);
+    if (!status.recent_tool.empty())
+        activity << QStringLiteral("最近工具 %1 · %2")
+                        .arg(q(status.recent_tool))
+                        .arg(activity_time_text(status.recent_tool_at));
+    if (!status.recent_agent.empty())
+        activity << QStringLiteral("最近 Agent %1 · %2")
+                        .arg(q(status.recent_agent))
+                        .arg(activity_time_text(status.recent_agent_at));
+    if (!status.git_worktree.empty())
+        activity << QStringLiteral("worktree %1").arg(q(status.git_worktree));
+    claude_activity_->setText(
+        activity.isEmpty() ? QStringLiteral("尚无会话活动元数据")
+                           : activity.join(QStringLiteral("\n")));
 
     set_usage_bar(
         claude_five_bar_,
@@ -1122,11 +1281,23 @@ void QtMainWindow::render_claude_cli_status() {
                        .arg(static_cast<int>(*status.context_used_percentage + 0.5));
     claude_updated_->setText(updated);
     claude_updated_->setToolTip(
-        QStringLiteral("用量缓存：%1\nClaude 配置：%2")
+        QStringLiteral("用量缓存：%1\nClaude 配置：%2\nSession ID：%3\nTranscript：%4")
             .arg(q(status.status_file.string()))
-            .arg(q(status.config_dir.string())));
+            .arg(q(status.config_dir.string()))
+            .arg(q(status.session_id))
+            .arg(q(status.transcript_path.string())));
 
     claude_config_->setEnabled(!status.config_dir.empty());
+    claude_project_->setEnabled(!claude_linked_project_id_.empty());
+    claude_project_->setToolTip(
+        claude_linked_project_id_.empty()
+            ? QStringLiteral("当前 Claude workspace 没有匹配到已登记的 Monitor 项目。")
+            : QStringLiteral("跳到已匹配的 Monitor 项目：%1").arg(linked_project_name));
+    claude_workspace_->setEnabled(
+        !status.project_dir.empty() || !status.cwd.empty());
+    claude_transcript_->setEnabled(
+        !status.transcript_path.empty() &&
+        local_exists(status.transcript_path.string()));
 }
 
 void QtMainWindow::refresh_quick_actions() {
@@ -1825,6 +1996,24 @@ void QtMainWindow::copy_debug_summary() {
         lines << QStringLiteral("claude_usage_source=%1").arg(q(claude.source));
     if (!claude.model.empty())
         lines << QStringLiteral("claude_model=%1").arg(q(claude.model));
+    if (!claude.session_id.empty())
+        lines << QStringLiteral("claude_session_id=%1").arg(q(claude.session_id));
+    if (!claude.session_name.empty())
+        lines << QStringLiteral("claude_session_name=%1").arg(q(claude.session_name));
+    if (!claude.project_dir.empty())
+        lines << QStringLiteral("claude_project_dir=%1").arg(q(claude.project_dir));
+    else if (!claude.cwd.empty())
+        lines << QStringLiteral("claude_cwd=%1").arg(q(claude.cwd));
+    if (!claude.git_worktree.empty())
+        lines << QStringLiteral("claude_git_worktree=%1").arg(q(claude.git_worktree));
+    if (!claude.agent_name.empty())
+        lines << QStringLiteral("claude_agent_name=%1").arg(q(claude.agent_name));
+    if (!claude.agent_type.empty())
+        lines << QStringLiteral("claude_agent_type=%1").arg(q(claude.agent_type));
+    if (!claude.recent_tool.empty())
+        lines << QStringLiteral("claude_recent_tool=%1").arg(q(claude.recent_tool));
+    if (!claude.recent_agent.empty())
+        lines << QStringLiteral("claude_recent_agent=%1").arg(q(claude.recent_agent));
     if (claude.five_hour.used_percentage)
         lines << QStringLiteral("claude_5h_used_percent=%1")
                      .arg(*claude.five_hour.used_percentage, 0, 'f', 1);
