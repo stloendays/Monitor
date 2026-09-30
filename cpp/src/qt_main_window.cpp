@@ -149,11 +149,26 @@ QString usage_reset_text(const std::optional<double>& epoch) {
     const auto seconds = static_cast<qint64>(*epoch);
     const auto when = QDateTime::fromSecsSinceEpoch(seconds).toLocalTime();
     const auto now = QDateTime::currentDateTime();
+
+    QString absolute;
     if (when.date() == now.date())
-        return QStringLiteral("今天 %1").arg(when.toString(QStringLiteral("HH:mm")));
-    if (when.date() == now.date().addDays(1))
-        return QStringLiteral("明天 %1").arg(when.toString(QStringLiteral("HH:mm")));
-    return when.toString(QStringLiteral("MM-dd HH:mm"));
+        absolute = QStringLiteral("今天 %1").arg(when.toString(QStringLiteral("HH:mm")));
+    else if (when.date() == now.date().addDays(1))
+        absolute = QStringLiteral("明天 %1").arg(when.toString(QStringLiteral("HH:mm")));
+    else
+        absolute = when.toString(QStringLiteral("MM-dd HH:mm"));
+
+    const auto remaining = now.secsTo(when);
+    if (remaining <= 0)
+        return absolute + QStringLiteral("（已到重置时间）");
+    if (remaining < 3600)
+        return absolute + QStringLiteral("（约 %1 分钟后）").arg((remaining + 59) / 60);
+    if (remaining < 48 * 3600) {
+        const auto hours = remaining / 3600;
+        const auto minutes = (remaining % 3600) / 60;
+        return absolute + QStringLiteral("（约 %1 小时 %2 分钟后）").arg(hours).arg(minutes);
+    }
+    return absolute;
 }
 
 QString observed_text(const std::optional<double>& epoch) {
@@ -1364,7 +1379,9 @@ void QtMainWindow::render_task_detail() {
 void QtMainWindow::copy_claude_statusline_setup() {
     const auto bridge = claude_bridge_path();
     const auto command =
-        QStringLiteral("/statusline 使用下面这个命令作为 Claude Code 状态栏命令，并保留它的 stdout 作为可见状态栏： python \"%1\"")
+        QStringLiteral("/statusline 请把下面命令接入 Claude Code 状态栏：python \"%1\"。"
+                       "如果我已经配置了 statusLine，请保留并合并原有状态栏行为，不要静默覆盖；"
+                       "确保这个 bridge 的 stdout 仍作为可见状态栏输出。")
             .arg(bridge);
     QApplication::clipboard()->setText(command);
     if (claude_updated_)
