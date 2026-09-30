@@ -67,7 +67,10 @@ void read_window(const json::object* rate_limits,
     if (!rate_limits) return;
     const auto* window = object(rate_limits->if_contains(key));
     if (!window) return;
-    out.used_percentage = number(window->if_contains("used_percentage"));
+    if (const auto used = number(window->if_contains("used_percentage"));
+        used && *used >= 0.0 && *used <= 100.0) {
+        out.used_percentage = used;
+    }
     out.resets_at = number(window->if_contains("resets_at"));
 }
 
@@ -133,8 +136,12 @@ void read_stream_rate_limit(const json::object& event,
         auto read_unified = [&](const char* key, ClaudeUsageWindow& out) {
             const auto* window = object(windows->if_contains(key));
             if (!window) return;
-            if (const auto utilization = number(window->if_contains("utilization")))
-                out.used_percentage = *utilization <= 1.0 ? *utilization * 100.0 : *utilization;
+            if (const auto utilization = number(window->if_contains("utilization"))) {
+                const auto percentage =
+                    *utilization <= 1.0 ? *utilization * 100.0 : *utilization;
+                if (percentage >= 0.0 && percentage <= 100.0)
+                    out.used_percentage = percentage;
+            }
             out.resets_at = number(window->if_contains("resetsAt"));
         };
         read_unified("five_hour", status.five_hour);
@@ -149,9 +156,12 @@ void read_stream_rate_limit(const json::object& event,
     else if (type == "seven_day") representative = &status.seven_day;
     if (representative) {
         if (reset) representative->resets_at = reset;
-        if (utilization)
-            representative->used_percentage =
+        if (utilization) {
+            const auto percentage =
                 *utilization <= 1.0 ? *utilization * 100.0 : *utilization;
+            if (percentage >= 0.0 && percentage <= 100.0)
+                representative->used_percentage = percentage;
+        }
     }
 }
 
