@@ -34,6 +34,7 @@ public:
 private:
     void build_ui();
     void refresh();
+    void render_context_header();
     void render_overview();
     void render_sidebar();
     void select_project(const std::string& id);

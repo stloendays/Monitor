@@ -3,6 +3,8 @@
 #include "monitor_hub/qt_main_window.hpp"
 
 #include <QApplication>
+#include <QFile>
+#include <QFont>
 #include <QIcon>
 #include <QMessageBox>
 
@@ -18,6 +20,15 @@ int main(int argc, char** argv) {
     QApplication::setApplicationVersion(QStringLiteral(MONITOR_HUB_VERSION));
     QApplication::setWindowIcon(
         QIcon(QStringLiteral(":/monitor_hub/icons/monitor_hub.png")));
+
+    QFont app_font(QStringLiteral("Segoe UI"));
+    app_font.setPointSizeF(10.0);
+    app.setFont(app_font);
+
+    QFile theme(QStringLiteral(":/monitor_hub/styles/modern.qss"));
+    if (theme.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        app.setStyleSheet(QString::fromUtf8(theme.readAll()));
+    }
 
     auto paths = monitor_hub::runtime_paths_from_env(
         argc > 0 ? std::filesystem::path(argv[0]) : std::filesystem::path{});

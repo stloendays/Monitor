@@ -59,3 +59,58 @@ The future Qt 6 UI must preserve the same distinction:
 - warnings/errors/required decisions remain persistent and visually prominent.
 
 The C++/Qt port should not reintroduce persistent help paragraphs that the Python UI has moved into tooltips.
+
+
+## 6. Visual design system
+
+The Qt desktop UI uses a restrained warm-neutral visual system inspired by modern AI workspaces without copying any product-specific trade dress.
+
+### Surfaces
+
+- application background: warm off-white;
+- navigation/sidebar: slightly darker neutral surface;
+- operational cards and tables: white;
+- separators: low-contrast warm gray;
+- avoid default bright-blue Qt chrome unless it communicates real state.
+
+### Hierarchy
+
+Use typography and spacing before color:
+
+- product/page title;
+- current operational status;
+- section title;
+- body/detail text;
+- muted metadata/helper text.
+
+The UI should feel calm even when many projects are present.
+
+### Status color
+
+Reserve semantic color for actual operational meaning:
+
+- green: healthy or successfully completed;
+- blue: active child-agent/background handling;
+- amber: attention or stale state;
+- red: monitor/error state;
+- gray: paused/neutral metadata.
+
+Do not color large surfaces solely for decoration.
+
+### Interaction
+
+- selected navigation items use a soft neutral fill;
+- primary action uses a dark neutral button;
+- secondary actions remain light;
+- tables have comfortable row height, subtle separators, and no heavy grid;
+- cards use moderate radius and light borders rather than shadows;
+- raw evidence/code paths use a subdued inset surface.
+
+### Context header
+
+The top context header follows navigation state:
+
+- Overview shows **Monitor Hub / Agent Operations** and aggregate health;
+- project tabs show the selected project, its health, headline, and runner state.
+
+This prevents a selected project's title from visually leaking into the cross-project Overview.
