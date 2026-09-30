@@ -182,8 +182,16 @@ For L2, the worker uses the first existing absolute context reference:
 
 The prompt still requires the child Agent to locate and read project governance before making changes.
 
-## Deliberately unsupported L1 actions
+## Deterministic handler registry
 
-A generic `restart_same_parameters` worker is **not** implemented here because restart semantics are scheduler/project specific.
+The worker now delegates L1 execution to the audited registry documented in `docs/DETERMINISTIC_HANDLERS.md`.
 
-The correct next step is an audited deterministic handler registry where each stable handler ID is backed by a project/platform adapter with explicit argument and recovery-verification contracts. Until such a handler exists, a policy naming it will fail closed rather than running arbitrary shell text.
+Registered handlers currently include:
+
+- `read_only_probe`;
+- `local_process_restart_v1`;
+- `pbs_qsub_restart_v1`.
+
+Restart executable/script/argv data is frozen in policy-owned `handler_config`; command payloads cannot override it.
+
+Unknown handlers still fail closed and escalate rather than executing arbitrary shell text.
