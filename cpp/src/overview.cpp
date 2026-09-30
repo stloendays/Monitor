@@ -195,4 +195,114 @@ OverviewModel build_overview_model(
     return model;
 }
 
+
+OverviewModel build_overview_model(
+    const std::vector<json::object>& projects,
+    const std::map<std::string, json::object>& snapshots,
+    const std::map<std::string, ProjectEventProjection>& event_projections,
+    std::size_t activity_limit) {
+
+    auto model = build_overview_model(projects, snapshots, 0);
+
+    auto project_name = [&](const std::string& id) {
+        const auto found = std::find_if(
+            model.projects.begin(),
+            model.projects.end(),
+            [&](const OverviewProject& item) { return item.project_id == id; });
+        return found == model.projects.end() ? id : found->project_name;
+    };
+
+    auto decrement_health = [&](const std::string& health) {
+        int* counter = nullptr;
+        if (health == "working") counter = &model.working_projects;
+        else if (health == "attention") counter = &model.attention_projects;
+        else if (health == "error") counter = &model.error_projects;
+        else if (health == "stale") counter = &model.stale_projects;
+        else if (health == "paused") counter = &model.paused_projects;
+        else if (health == "done") counter = &model.done_projects;
+        else counter = &model.ok_projects;
+        if (*counter > 0) --*counter;
+    };
+
+    for (const auto& [project_id, projection] : event_projections) {
+        for (const auto& issue : projection.issues) {
+            if (issue.resolved || !issue.user_action_required) continue;
+            const auto summary =
+                issue.summary.empty() ? issue.issue_id : issue.summary;
+
+            auto existing = std::find_if(
+                model.attention.begin(),
+                model.attention.end(),
+                [&](const OverviewAttentionItem& item) {
+                    return item.project_id == project_id &&
+                           item.summary == summary;
+                });
+            if (existing != model.attention.end()) {
+                existing->kind = "需要决策";
+                existing->source = "event";
+                existing->issue_id = issue.issue_id;
+            } else {
+                model.attention.push_back({
+                    project_id,
+                    project_name(project_id),
+                    "需要决策",
+                    summary,
+                    "event",
+                    issue.issue_id,
+                });
+            }
+
+            auto project = std::find_if(
+                model.projects.begin(),
+                model.projects.end(),
+                [&](const OverviewProject& item) {
+                    return item.project_id == project_id;
+                });
+            if (project != model.projects.end() &&
+                project->health != "attention" &&
+                project->health != "error" &&
+                project->health != "stale") {
+                decrement_health(project->health);
+                ++model.attention_projects;
+                project->health = "attention";
+                project->headline = summary;
+            }
+        }
+
+        for (const auto& event : projection.events) {
+            if (event.event_type.rfind("agent.", 0) != 0) continue;
+
+            std::string state = "running";
+            if (event.event_type == "agent.failed") state = "failed";
+            else if (event.event_type == "agent.completed" ||
+                     event.event_type == "agent.action_finished")
+                state = "ok";
+
+            model.activity.push_back({
+                project_id,
+                project_name(project_id),
+                short_time(event.occurred_at),
+                state,
+                event.summary.empty()
+                    ? event_display_name(event.event_type)
+                    : event.summary,
+                projection.source_path.string(),
+                parse_iso_local_seconds(event.occurred_at).value_or(0.0),
+                "event",
+            });
+        }
+    }
+
+    std::stable_sort(
+        model.activity.begin(),
+        model.activity.end(),
+        [](const OverviewAgentActivity& lhs, const OverviewAgentActivity& rhs) {
+            return lhs.time > rhs.time;
+        });
+    if (activity_limit > 0 && model.activity.size() > activity_limit)
+        model.activity.resize(activity_limit);
+
+    return model;
+}
+
 }  // namespace monitor_hub

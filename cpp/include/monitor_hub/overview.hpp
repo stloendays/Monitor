@@ -1,6 +1,7 @@
 #pragma once
 
 #include "monitor_hub/core.hpp"
+#include "monitor_hub/event_store.hpp"
 
 #include <cstddef>
 #include <map>
@@ -22,6 +23,8 @@ struct OverviewAttentionItem {
     std::string project_name;
     std::string kind;
     std::string summary;
+    std::string source;
+    std::string issue_id;
 };
 
 struct OverviewAgentActivity {
@@ -32,6 +35,7 @@ struct OverviewAgentActivity {
     std::string summary;
     std::string path;
     double time = 0.0;
+    std::string source;
 };
 
 struct OverviewModel {
@@ -52,6 +56,12 @@ struct OverviewModel {
 OverviewModel build_overview_model(
     const std::vector<json::object>& projects,
     const std::map<std::string, json::object>& snapshots,
+    std::size_t activity_limit = 24);
+
+OverviewModel build_overview_model(
+    const std::vector<json::object>& projects,
+    const std::map<std::string, json::object>& snapshots,
+    const std::map<std::string, ProjectEventProjection>& event_projections,
     std::size_t activity_limit = 24);
 
 }  // namespace monitor_hub
