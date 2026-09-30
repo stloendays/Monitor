@@ -1,0 +1,369 @@
+/* Monitor Hub modern warm-neutral theme.
+   Visual inspiration: contemporary AI workspaces — restrained chrome,
+   warm surfaces, clear hierarchy, and status color only where meaningful. */
+
+QWidget {
+    color: #292824;
+    font-size: 13px;
+    selection-background-color: #E7E5DF;
+    selection-color: #22211F;
+}
+
+QMainWindow,
+QWidget#appRoot {
+    background: #F7F6F2;
+}
+
+QWidget#sidebar {
+    background: #EFEEE9;
+    border: 1px solid #E2E0D9;
+    border-radius: 16px;
+}
+
+QWidget#mainPane {
+    background: transparent;
+}
+
+QWidget#contextHeader {
+    background: #FFFFFF;
+    border: 1px solid #E8E6E0;
+    border-radius: 16px;
+}
+
+QLabel#brandTitle {
+    color: #24231F;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QLabel#brandSubtitle {
+    color: #817E76;
+    font-size: 11px;
+}
+
+QLabel#pageTitle {
+    color: #22211F;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+QLabel#pageMeta {
+    color: #858179;
+    font-size: 12px;
+    padding-left: 4px;
+}
+
+QLabel#headline {
+    color: #393733;
+    font-size: 14px;
+}
+
+QLabel#mutedText {
+    color: #858179;
+    font-size: 12px;
+}
+
+QLabel#sectionLabel {
+    color: #6F6C65;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#pageSectionTitle {
+    color: #262521;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+QLabel#summaryText {
+    color: #77736C;
+    font-size: 12px;
+}
+
+QLabel#cardTitle {
+    color: #272622;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+QLabel#healthBadge {
+    border-radius: 9px;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#healthBadge[health="ok"] {
+    color: #23603E;
+    background: #ECF6EF;
+    border: 1px solid #D9EBDD;
+}
+
+QLabel#healthBadge[health="working"] {
+    color: #395C86;
+    background: #EEF4FA;
+    border: 1px solid #DDE8F3;
+}
+
+QLabel#healthBadge[health="attention"],
+QLabel#healthBadge[health="stale"] {
+    color: #8A5316;
+    background: #FBF3E7;
+    border: 1px solid #F0DFC6;
+}
+
+QLabel#healthBadge[health="error"] {
+    color: #9C3B32;
+    background: #FBEDEC;
+    border: 1px solid #F2D6D3;
+}
+
+QLabel#healthBadge[health="done"] {
+    color: #4E5E50;
+    background: #EFF3EF;
+    border: 1px solid #DFE6DF;
+}
+
+QLabel#healthBadge[health="paused"] {
+    color: #6C6962;
+    background: #F1F0ED;
+    border: 1px solid #E3E1DC;
+}
+
+QListWidget#projectList {
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 2px;
+}
+
+QListWidget#projectList::item {
+    color: #484641;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 11px;
+    margin: 1px 0px;
+}
+
+QListWidget#projectList::item:hover {
+    background: #E7E5DF;
+    color: #292824;
+}
+
+QListWidget#projectList::item:selected {
+    background: #DCDAD3;
+    color: #22211F;
+    font-weight: 600;
+}
+
+QTabWidget#mainTabs::pane {
+    border: none;
+    background: transparent;
+    top: -1px;
+}
+
+QTabBar::tab {
+    color: #77736C;
+    background: transparent;
+    border: none;
+    border-radius: 9px;
+    padding: 9px 14px;
+    margin: 0px 4px 7px 0px;
+}
+
+QTabBar::tab:hover {
+    color: #33312D;
+    background: #EFEEE9;
+}
+
+QTabBar::tab:selected {
+    color: #272622;
+    background: #E6E4DE;
+    font-weight: 600;
+}
+
+QPushButton {
+    color: #34322E;
+    background: #FFFFFF;
+    border: 1px solid #DCD9D1;
+    border-radius: 10px;
+    padding: 7px 12px;
+    min-height: 20px;
+    font-weight: 500;
+}
+
+QPushButton:hover {
+    background: #F3F2EE;
+    border-color: #D2CFC7;
+}
+
+QPushButton:pressed {
+    background: #EAE8E2;
+}
+
+QPushButton:disabled {
+    color: #AAA69E;
+    background: #F4F3F0;
+    border-color: #E7E5DF;
+}
+
+QPushButton[role="primary"] {
+    color: #FFFFFF;
+    background: #2F2E2A;
+    border-color: #2F2E2A;
+    font-weight: 600;
+}
+
+QPushButton[role="primary"]:hover {
+    background: #22211F;
+    border-color: #22211F;
+}
+
+QPushButton#infoButton {
+    color: #97938B;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 4px;
+    min-width: 24px;
+    min-height: 24px;
+}
+
+QPushButton#infoButton:hover {
+    color: #5F5C55;
+    background: #E9E7E1;
+}
+
+QFrame#detailCard {
+    background: #FFFFFF;
+    border: 1px solid #E8E6E0;
+    border-radius: 14px;
+}
+
+QTableWidget {
+    background: #FFFFFF;
+    alternate-background-color: #FFFFFF;
+    border: 1px solid #E8E6E0;
+    border-radius: 13px;
+    gridline-color: transparent;
+    outline: none;
+    padding: 0px;
+}
+
+QTableWidget::item {
+    color: #3E3C37;
+    border: none;
+    border-bottom: 1px solid #F0EEE9;
+    padding: 8px 10px;
+}
+
+QTableWidget::item:hover {
+    background: #F8F7F4;
+}
+
+QTableWidget::item:selected {
+    color: #272622;
+    background: #ECEAE4;
+}
+
+QHeaderView {
+    background: transparent;
+    border: none;
+}
+
+QHeaderView::section {
+    color: #78746D;
+    background: #F8F7F4;
+    border: none;
+    border-bottom: 1px solid #E8E6E0;
+    padding: 8px 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+QTableCornerButton::section {
+    background: #F8F7F4;
+    border: none;
+}
+
+QTextEdit#notesPanel {
+    color: #625F58;
+    background: #F4F3EF;
+    border: 1px solid #E7E4DD;
+    border-radius: 10px;
+    padding: 8px;
+}
+
+QLabel#codeBlock {
+    color: #5B5852;
+    background: #F5F4F0;
+    border: 1px solid #E7E4DD;
+    border-radius: 10px;
+    padding: 9px;
+}
+
+QSplitter::handle {
+    background: transparent;
+}
+
+QSplitter::handle:horizontal {
+    width: 10px;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical {
+    background: #D7D4CD;
+    min-height: 28px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #C7C3BB;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical,
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: transparent;
+    border: none;
+    height: 0px;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 2px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #D7D4CD;
+    min-width: 28px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #C7C3BB;
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal,
+QScrollBar::add-page:horizontal,
+QScrollBar::sub-page:horizontal {
+    background: transparent;
+    border: none;
+    width: 0px;
+}
+
+QToolTip {
+    color: #F8F7F4;
+    background: #2D2C29;
+    border: 1px solid #44413C;
+    border-radius: 8px;
+    padding: 6px 8px;
+}
