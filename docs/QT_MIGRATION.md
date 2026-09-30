@@ -16,6 +16,10 @@ The optional `monitor_hub_qt` target currently provides a read-only operational 
 - raw takeover evidence can be opened from the project takeover table;
 - newbie-friendly two-row quick-debug action bar for project/task inspection plus registry/Hub/job-root access;
 - context-aware command copy and bounded diagnostic-context copy without execution;
+- Claude CLI sidebar card with local CLI/process detection;
+- zero-token Claude statusLine bridge for 5-hour / 7-day usage and reset-time display;
+- cdesktop-detach rate-limit event fallback when no statusLine cache is available;
+- direct access to Claude config plus copyable `/usage` command;
 - project headline and runner state;
 - progress table;
 - dedicated task-detail pane;
@@ -87,7 +91,7 @@ cmake --build cpp/build --config Release
 ctest --test-dir cpp/build -C Release --output-on-failure
 ```
 
-The cross-project Overview aggregation is covered by `monitor_hub_core_tests`, so status/attention/activity grouping can be validated without Qt.
+The cross-project Overview aggregation and Claude CLI usage-snapshot parsing are covered by `monitor_hub_core_tests`, so those projections can be validated without Qt. The Python statusLine bridge has a separate sanitization test to ensure secret-looking input fields are not persisted.
 
 ## Not migrated yet
 

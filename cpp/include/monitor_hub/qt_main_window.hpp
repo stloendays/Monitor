@@ -1,6 +1,7 @@
 #pragma once
 
 #include "monitor_hub/core.hpp"
+#include "monitor_hub/claude_cli.hpp"
 
 #include <QMainWindow>
 
@@ -11,6 +12,7 @@
 class QLabel;
 class QListWidget;
 class QPushButton;
+class QProgressBar;
 class QTableWidget;
 class QTabWidget;
 class QTextEdit;
@@ -35,6 +37,7 @@ private:
     void build_ui();
     void refresh();
     void render_context_header();
+    void render_claude_cli_status();
     void refresh_quick_actions();
     void render_overview();
     void render_sidebar();
@@ -52,6 +55,8 @@ private:
     void open_quick_target(const std::string& kind);
     void copy_task_command();
     void copy_debug_summary();
+    void copy_claude_statusline_setup();
+    void open_claude_config();
 
     RuntimePaths paths_;
     SystemInfo system_;
@@ -61,6 +66,17 @@ private:
     std::string selected_task_id_;
 
     QListWidget* project_list_ = nullptr;
+    QLabel* claude_cli_state_ = nullptr;
+    QLabel* claude_cli_meta_ = nullptr;
+    QLabel* claude_five_text_ = nullptr;
+    QLabel* claude_seven_text_ = nullptr;
+    QLabel* claude_updated_ = nullptr;
+    QProgressBar* claude_five_bar_ = nullptr;
+    QProgressBar* claude_seven_bar_ = nullptr;
+    QPushButton* claude_setup_ = nullptr;
+    QPushButton* claude_config_ = nullptr;
+    QPushButton* claude_usage_ = nullptr;
+
     QLabel* title_ = nullptr;
     QLabel* area_ = nullptr;
     QLabel* health_ = nullptr;

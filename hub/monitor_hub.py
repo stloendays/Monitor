@@ -39,10 +39,11 @@ import status_contract as contract  # noqa: E402
 REGISTRY = os.environ.get("MONITOR_HUB_REGISTRY") or os.path.join(HERE, "monitor_hub_projects.json")
 README = os.path.join(HERE, "monitor_hub_README.md")
 DISCOVERY = not os.environ.get("MONITOR_HUB_NO_DISCOVERY")
-DETACH = r"C:\Users\ASUS\.claude\tools\cdesktop-detach.ps1"       # shared detached-job helper (copy in ../deps)
+DETACH = os.environ.get("MONITOR_HUB_DETACH") or r"C:\Users\ASUS\.claude\tools\cdesktop-detach.ps1"
 JOBROOT = os.path.join(os.environ.get("LOCALAPPDATA", r"C:\Users\ASUS\AppData\Local"), "cdesktop-jobs")
-CLAUDE = r"D:\Download\npm-global\node_modules\@anthropic-ai\claude-code\bin\claude.exe"
-PWSH = r"D:\Tools\PowerShell\7.6.3\pwsh.exe" if os.path.exists(r"D:\Tools\PowerShell\7.6.3\pwsh.exe") else "pwsh"
+CLAUDE = os.environ.get("MONITOR_HUB_CLAUDE_EXE") or r"D:\Download\npm-global\node_modules\@anthropic-ai\claude-code\bin\claude.exe"
+_DEFAULT_PWSH = r"D:\Tools\PowerShell\7.6.3\pwsh.exe"
+PWSH = os.environ.get("MONITOR_HUB_PWSH") or (_DEFAULT_PWSH if os.path.exists(_DEFAULT_PWSH) else "pwsh")
 HUB_DATA = os.environ.get("MONITOR_HUB_DATA") or r"D:\Research\monitor-hub"
 REQ_DIR = os.path.join(HUB_DATA, "requests")
 REFRESH_S, TICK_MS = 60, 3000
@@ -261,7 +262,7 @@ def probe():
     try:
         wmi = win32com.client.GetObject(r"winmgmts:\\.\root\cimv2")
         for p in wmi.ExecQuery("SELECT ProcessId, Name, CommandLine FROM Win32_Process WHERE Name='pwsh.exe' OR "
-                               "Name='powershell.exe' OR Name='python.exe' OR Name='claude.exe'"):
+                               "Name='powershell.exe' OR Name='python.exe' OR Name='claude.exe' OR Name='node.exe'"):
             procs.append(dict(pid=int(p.ProcessId), name=p.Name, cmd=p.CommandLine or ""))
     except Exception as e:  # noqa: BLE001
         err = (err or "") + " 读取进程失败：%r" % e

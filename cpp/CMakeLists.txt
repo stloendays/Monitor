@@ -10,6 +10,7 @@ find_package(Boost 1.82 REQUIRED)
 add_library(monitor_hub_core
     src/core.cpp
     src/overview.cpp
+    src/claude_cli.cpp
     src/windows_probe.cpp
     src/boost_json.cpp
 )
@@ -30,6 +31,10 @@ endif()
 add_executable(monitor_hub_cli src/main.cpp)
 target_link_libraries(monitor_hub_cli PRIVATE monitor_hub_core)
 install(TARGETS monitor_hub_cli RUNTIME DESTINATION bin)
+install(
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/../hub/claude_statusline_bridge.py"
+    DESTINATION share/monitor_hub
+)
 
 option(MONITOR_HUB_BUILD_QT "Build the Qt 6 desktop UI" OFF)
 if(MONITOR_HUB_BUILD_QT)

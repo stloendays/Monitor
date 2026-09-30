@@ -1,5 +1,6 @@
 #include "monitor_hub/core.hpp"
 #include "monitor_hub/overview.hpp"
+#include "monitor_hub/claude_cli.hpp"
 
 #include <boost/json.hpp>
 #include <cassert>
@@ -185,6 +186,40 @@ int main() {
     assert(overview.activity.size() == 2);
     assert(overview.activity[0].project_id == "alpha");
     assert(overview.activity[1].project_id == "beta");
+
+    // Claude CLI status is read from the zero-token statusLine bridge snapshot.
+    const auto claude_status_file = paths.hub_data / "claude" / "cli_status.json";
+    write_file(
+        claude_status_file,
+        R"({"schema_version":1,"source":"claude_statusline","captured_at":"2026-09-30T10:15:00","version":"2.1.259","model":{"id":"claude-sonnet-5","display_name":"Claude Sonnet 5"},"workspace":{"current_dir":"C:/demo"},"context_window":{"used_percentage":31.5},"cost":{"total_cost_usd":1.23},"rate_limits_available":true,"rate_limits":{"five_hour":{"used_percentage":24.0,"resets_at":1788062400},"seven_day":{"used_percentage":13.0,"resets_at":1788580800}}})");
+    SystemInfo claude_sys;
+    claude_sys.procs.push_back(ProcessInfo{1234, "claude.exe", "claude"});
+    const auto claude = load_claude_cli_status(claude_sys, paths);
+    assert(claude.running_processes == 1);
+    assert(claude.source == "claude_statusline");
+    assert(claude.version == "2.1.259");
+    assert(claude.model == "Claude Sonnet 5");
+    assert(claude.rate_limits_available);
+    assert(claude.five_hour.used_percentage &&
+           *claude.five_hour.used_percentage == 24.0);
+    assert(claude.seven_day.used_percentage &&
+           *claude.seven_day.used_percentage == 13.0);
+    assert(claude.context_used_percentage &&
+           *claude.context_used_percentage == 31.5);
+
+    // Fallback: background Claude stream-json can provide reset/utilization
+    // without reading OAuth credentials when no statusLine cache exists.
+    fs::remove(claude_status_file);
+    const auto claude_job = paths.job_root / "claude-test";
+    write_file(
+        claude_job / "output.log",
+        R"({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1788062400,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.42,"resetsAt":1788062400},"seven_day":{"utilization":0.21,"resetsAt":1788580800}}}})");
+    const auto stream_claude = load_claude_cli_status(claude_sys, paths);
+    assert(stream_claude.source == "stream-json");
+    assert(stream_claude.five_hour.used_percentage &&
+           *stream_claude.five_hour.used_percentage == 42.0);
+    assert(stream_claude.seven_day.used_percentage &&
+           *stream_claude.seven_day.used_percentage == 21.0);
 
     fs::remove_all(root);
     std::cout << "core tests passed\n";

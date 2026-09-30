@@ -16,6 +16,31 @@ def render_event(d):
     t = d.get("type")
     if t == "system" and d.get("subtype") == "init":
         return ["[start] session %s  model %s  cwd %s" % (d.get("session_id"), d.get("model"), d.get("cwd"))]
+    if t == "rate_limit_event":
+        info = d.get("rate_limit_info") or {}
+        windows = info.get("unifiedWindows") or {}
+        parts = []
+        for key, label in (("five_hour", "5h"), ("seven_day", "7d")):
+            w = windows.get(key) or {}
+            util = w.get("utilization")
+            reset = w.get("resetsAt")
+            if isinstance(util, (int, float)):
+                util = util * 100 if util <= 1 else util
+                parts.append("%s %.0f%%" % (label, util))
+            elif isinstance(reset, (int, float)):
+                parts.append("%s reset %s" % (label, reset))
+        if not parts:
+            kind = info.get("rateLimitType")
+            util = info.get("utilization")
+            reset = info.get("resetsAt")
+            text = str(kind or "rate limit")
+            if isinstance(util, (int, float)):
+                util = util * 100 if util <= 1 else util
+                text += " %.0f%%" % util
+            if isinstance(reset, (int, float)):
+                text += " reset %s" % reset
+            parts.append(text)
+        return ["[Claude usage] " + " · ".join(parts)]
     if t == "assistant":
         out = []
         for c in d.get("message", {}).get("content", []) or []:
