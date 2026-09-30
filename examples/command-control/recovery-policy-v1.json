@@ -4,6 +4,22 @@
   "project_id": "example-project",
   "actions": [
     {
+      "action_id": "probe_context",
+      "authority": "L1",
+      "dispatch_kind": "deterministic",
+      "handler": "read_only_probe",
+      "allowed_command_types": [
+        "monitor.probe.requested"
+      ],
+      "constraints": [
+        "read-only filesystem metadata only"
+      ],
+      "completion_criteria": [
+        "context reference metadata is recorded"
+      ],
+      "enabled": true
+    },
+    {
       "action_id": "restart_same_parameters",
       "authority": "L1",
       "dispatch_kind": "deterministic",
