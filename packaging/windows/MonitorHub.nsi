@@ -26,11 +26,7 @@ ShowUnInstDetails show
 !define MUI_UNICON "${STAGE_DIR}\resources\monitor_hub.ico"
 
 !define MUI_WELCOMEPAGE_TITLE "Monitor Hub ${VERSION} · 安装向导"
-!define MUI_WELCOMEPAGE_TEXT "Monitor Hub 是面向本地计算、HPC 与 Agent 工作流的 Windows 监控控制台。$$
-$$
-推荐保持默认安装目录。本安装仅作用于当前用户，不需要管理员权限，也不会删除、移动或覆盖你的项目/计算数据。$$
-$$
-Monitor Hub 支持托盘与后台运行；关闭主窗口时，如果启用了关闭到托盘，程序仍会继续运行。"
+!define MUI_WELCOMEPAGE_TEXT "Monitor Hub 是面向本地计算、HPC 与 Agent 工作流的 Windows 监控控制台。$\r$\n$\r$\n推荐保持默认安装目录。本安装仅作用于当前用户，不需要管理员权限，也不会删除、移动或覆盖你的项目/计算数据。$\r$\n$\r$\nMonitor Hub 支持托盘与后台运行；关闭主窗口时，如果启用了关闭到托盘，程序仍会继续运行。"
 !define MUI_FINISHPAGE_TITLE "Monitor Hub ${VERSION} 已安装完成"
 !define MUI_FINISHPAGE_TEXT "建议首次启动后检查：监控项目路径、Claude CLI 接入、通知设置和自动处理权限。自动恢复始终受项目 recovery policy 与 L1/L2/L3 权限边界约束。"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\bin\monitor_hub_qt.exe"
