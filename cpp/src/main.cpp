@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
             }
             const auto outbox =
                 monitor_hub::load_notification_outbox(paths);
-            json::object response;
+            boost::json::object response;
             response["acknowledged"] = true;
             response["notification_id"] = *acknowledge_id;
             response["actor"] = acknowledge_actor;
