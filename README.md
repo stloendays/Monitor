@@ -107,12 +107,23 @@ docs/
 tests/                              演示数据、页面巡览截图、COM / 后台作业 / 适配器 / 新任务办理测试（见 tests/README.md）
 ```
 
-## 改写成 C++
+## C++ / Qt 主线
 
-计划用 C++（建议 Qt 6 + nlohmann/json + Task Scheduler COM + WMI）重写。[docs/PORTING_TO_CPP.md](docs/PORTING_TO_CPP.md) 给出了：
-- 逐个函数的对照表；
-- 必须保留的行为（不闪窗、只读提问的参数、健康判定的优先级、界面配色和字号）；
-- 对照测试的方法：两个版本都在演示数据上运行 `--dump`，逐字段比较。
+当前正式 Release 已经以 **C++20 + Qt 6** 为主线，Python UI 保留用于兼容、迁移和历史对照。
+
+C++ 主线目前包含：
+
+- Windows Task Scheduler COM + WMI 只读探测；
+- Monitor 项目/任务/Issue/Agent Event 统一投影；
+- Qt 6 桌面 UI、系统托盘、单实例、设置与通知；
+- Claude CLI 用量/session/workspace/statusLine 集成；
+- policy-bounded L1/L2/L3 command control；
+- deterministic local/PBS recovery handlers；
+- durable notification outbox；
+- Windows installer / portable / updater package；
+- stable Release workflow 与 SHA-256 校验。
+
+迁移设计与历史对照仍保留在 [docs/PORTING_TO_CPP.md](docs/PORTING_TO_CPP.md)。
 
 ## 关于这个项目
 
