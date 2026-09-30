@@ -2198,6 +2198,71 @@ void QtMainWindow::render_event_timeline() {
             return lhs->last_event_at > rhs->last_event_at;
         });
 
+    recovery_flow_->setRowCount(
+        static_cast<int>(issue_rows.size()));
+    for (int row = 0;
+         row < static_cast<int>(issue_rows.size());
+         ++row) {
+        const auto& issue =
+            *issue_rows[static_cast<std::size_t>(row)];
+        const auto stage = issue_recovery_stage(issue);
+
+        auto* task = new QTableWidgetItem(
+            issue.task_id.empty()
+                ? QStringLiteral("—")
+                : q(issue.task_id));
+        task->setData(Qt::UserRole, q(issue.task_id));
+        recovery_flow_->setItem(row, 0, task);
+        recovery_flow_->setItem(
+            row,
+            1,
+            new QTableWidgetItem(q(issue.issue_id)));
+
+        auto* flow =
+            new QTableWidgetItem(recovery_flow_text(issue));
+        flow->setToolTip(
+            QStringLiteral(
+                "动作完成不等于恢复完成；只有 Monitor 独立验证恢复后，"
+                "流程才会进入“恢复已验证”。"));
+        recovery_flow_->setItem(row, 2, flow);
+
+        auto* stage_item = new QTableWidgetItem(
+            q(issue_recovery_stage_display_name(stage)));
+        emphasize_item(
+            stage_item,
+            recovery_stage_color(stage));
+        recovery_flow_->setItem(row, 3, stage_item);
+
+        auto* next = new QTableWidgetItem(
+            q(issue_recovery_next_step(issue)));
+        QStringList detail;
+        if (!issue.current_action.empty())
+            detail << QStringLiteral("当前动作：") +
+                          q(issue.current_action);
+        if (!issue.summary.empty())
+            detail << QStringLiteral("Issue：") +
+                          q(issue.summary);
+        if (!detail.isEmpty())
+            next->setToolTip(detail.join(QStringLiteral("\n")));
+        recovery_flow_->setItem(row, 4, next);
+
+        auto* authority = new QTableWidgetItem(
+            issue.authority.empty()
+                ? QStringLiteral("—")
+                : q(issue.authority));
+        if (issue.authority == "L3")
+            emphasize_item(
+                authority,
+                QColor(QStringLiteral("#9A641F")));
+        else if (issue.authority == "L1" ||
+                 issue.authority == "L2")
+            emphasize_item(
+                authority,
+                QColor(QStringLiteral("#4E6B8A")));
+        recovery_flow_->setItem(row, 5, authority);
+    }
+    recovery_flow_->resizeColumnsToContents();
+
     issues_->setRowCount(static_cast<int>(issue_rows.size()));
     for (int row = 0; row < static_cast<int>(issue_rows.size()); ++row) {
         const auto& issue = *issue_rows[static_cast<std::size_t>(row)];
