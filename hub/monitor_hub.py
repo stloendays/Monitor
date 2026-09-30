@@ -262,7 +262,7 @@ def probe():
     try:
         wmi = win32com.client.GetObject(r"winmgmts:\\.\root\cimv2")
         for p in wmi.ExecQuery("SELECT ProcessId, Name, CommandLine FROM Win32_Process WHERE Name='pwsh.exe' OR "
-                               "Name='powershell.exe' OR Name='python.exe' OR Name='claude.exe'"):
+                               "Name='powershell.exe' OR Name='python.exe' OR Name='claude.exe' OR Name='node.exe'"):
             procs.append(dict(pid=int(p.ProcessId), name=p.Name, cmd=p.CommandLine or ""))
     except Exception as e:  # noqa: BLE001
         err = (err or "") + " 读取进程失败：%r" % e
