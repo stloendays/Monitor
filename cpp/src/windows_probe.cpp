@@ -321,19 +321,25 @@ SystemInfo probe_system_info() {
     const HRESULT security = initialize_security();
     if (FAILED(security)) out.error = "COM 安全初始化失败：" + hr_text(security);
 
-    ComPtr<ITaskService> service;
-    HRESULT hr = CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER,
-                                  IID_ITaskService, reinterpret_cast<void**>(service.GetAddressOf()));
-    if (SUCCEEDED(hr) && service) {
-        VARIANT empty{};
-        VariantInit(&empty);
-        hr = service->Connect(empty, empty, empty, empty);
-        if (SUCCEEDED(hr)) {
-            BSTR root_path = SysAllocString(L"\\");
-            ComPtr<ITaskFolder> root;
-            hr = service->GetFolder(root_path, root.GetAddressOf());
-            SysFreeString(root_path);
-            if (SUCCEEDED(hr) && root) read_task_folder(root.Get(), out);
+    HRESULT hr = S_OK;
+    {
+        // Every COM smart pointer must be destroyed before CoUninitialize().
+        // Keeping ITaskService alive across CoUninitialize can crash during
+        // ComPtr destruction on process exit.
+        ComPtr<ITaskService> service;
+        hr = CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_ITaskService, reinterpret_cast<void**>(service.GetAddressOf()));
+        if (SUCCEEDED(hr) && service) {
+            VARIANT empty{};
+            VariantInit(&empty);
+            hr = service->Connect(empty, empty, empty, empty);
+            if (SUCCEEDED(hr)) {
+                BSTR root_path = SysAllocString(L"\\");
+                ComPtr<ITaskFolder> root;
+                hr = service->GetFolder(root_path, root.GetAddressOf());
+                SysFreeString(root_path);
+                if (SUCCEEDED(hr) && root) read_task_folder(root.Get(), out);
+            }
         }
     }
     if (FAILED(hr)) {
