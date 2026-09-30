@@ -192,9 +192,11 @@ void update_issue_projection(
             issue.resolved = false;
         } else if (event.event_type == "issue.action_applied") {
             issue.action_applied = true;
+            issue.user_action_required = false;
             issue.resolved = false;
         } else if (event.event_type == "issue.recovery_started") {
             issue.recovery_started = true;
+            issue.user_action_required = false;
             issue.resolved = false;
         } else if (event.event_type == "issue.recovery_verified") {
             issue.recovery_started = true;
@@ -244,6 +246,7 @@ void update_issue_projection(
     if (event.event_type == "task.restarted") {
         issue.task_restarted = true;
         issue.action_applied = true;
+        issue.user_action_required = false;
         if (issue.authority.empty() &&
             event.source_kind == "core" &&
             event.source_id == "monitor-hub-dispatch-worker")
