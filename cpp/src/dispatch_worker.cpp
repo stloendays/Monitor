@@ -1,4 +1,5 @@
 #include "monitor_hub/dispatch_worker.hpp"
+#include "monitor_hub/deterministic_handlers.hpp"
 
 #include <boost/system/error_code.hpp>
 
@@ -580,75 +581,112 @@ void add_diagnostic(
         result.diagnostics.push_back(std::move(message));
 }
 
-void run_l1_probe(
+void run_l1_handler(
     const RuntimePaths& paths,
     const DispatchRecord& dispatch,
     DispatchWorkerResult& result) {
 
-    json::array observations;
-    std::size_t existing = 0;
+    const auto execution =
+        execute_deterministic_handler(dispatch);
 
-    for (const auto& ref : dispatch.context_refs) {
-        json::object observation;
-        observation["path"] = ref;
+    if (!execution.supported) {
+        const auto reason =
+            execution.error.empty()
+            ? "No audited L1 worker is registered for handler: " +
+                  dispatch.handler
+            : execution.error;
+        emit_escalation(
+            paths,
+            dispatch,
+            "unsupported_l1_handler",
+            reason,
+            "unsupported_handler");
 
-        const fs::path path(ref);
-        if (!path.is_absolute()) {
-            observation["exists"] = false;
-            observation["error"] =
-                "built-in read_only_probe requires absolute context_refs";
-            observations.emplace_back(std::move(observation));
-            continue;
-        }
+        WorkerReceipt receipt;
+        receipt.dispatch_id = dispatch.dispatch_id;
+        receipt.command_id = dispatch.command_id;
+        receipt.project_id = dispatch.project_id;
+        receipt.authority = dispatch.authority;
+        receipt.state = "failed";
+        receipt.reason = reason;
+        receipt.updated_at = iso_now_local();
+        record_receipt(paths, result, std::move(receipt));
+        return;
+    }
 
-        std::error_code ec;
-        const bool exists = fs::exists(path, ec) && !ec;
-        observation["exists"] = exists;
-        if (!exists) {
-            if (ec) observation["error"] = ec.message();
-            observations.emplace_back(std::move(observation));
-            continue;
-        }
+    if (!execution.success) {
+        const auto reason =
+            execution.error.empty()
+            ? "deterministic handler failed"
+            : execution.error;
+        emit_escalation(
+            paths,
+            dispatch,
+            "deterministic_handler_failed",
+            reason,
+            "deterministic_failed");
 
-        ++existing;
-        ec.clear();
-        if (fs::is_regular_file(path, ec) && !ec) {
-            observation["kind"] = "file";
-            ec.clear();
-            const auto size = fs::file_size(path, ec);
-            if (!ec)
-                observation["size"] =
-                    static_cast<std::uint64_t>(size);
-        } else if (fs::is_directory(path, ec) && !ec) {
-            observation["kind"] = "directory";
-        } else {
-            observation["kind"] = "other";
-        }
-
-        const auto modified = mtime_seconds(path);
-        if (modified) observation["mtime"] = *modified;
-        observations.emplace_back(std::move(observation));
+        WorkerReceipt receipt;
+        receipt.dispatch_id = dispatch.dispatch_id;
+        receipt.command_id = dispatch.command_id;
+        receipt.project_id = dispatch.project_id;
+        receipt.authority = dispatch.authority;
+        receipt.state = "failed";
+        receipt.reason = reason;
+        receipt.updated_at = iso_now_local();
+        record_receipt(paths, result, std::move(receipt));
+        return;
     }
 
     json::object payload;
-    payload["summary"] =
-        "Read-only probe observed " +
-        std::to_string(existing) + "/" +
-        std::to_string(dispatch.context_refs.size()) +
-        " context references";
-    payload["handler"] = dispatch.handler;
-    payload["observations"] = std::move(observations);
-    payload["evidence_refs"] = json_strings(dispatch.context_refs);
+    payload["summary"] = execution.summary;
+    payload["handler"] = execution.handler;
+    payload["evidence_refs"] =
+        json_strings(execution.evidence_refs);
+    payload["handler_metadata"] = execution.metadata;
+    if (execution.process_id != 0)
+        payload["process_id"] = execution.process_id;
+    if (execution.exit_code >= 0)
+        payload["exit_code"] = execution.exit_code;
 
-    append_event_if_missing(
-        paths,
-        dispatch,
-        event_envelope(
+    if (!execution.action_applied) {
+        append_event_if_missing(
+            paths,
             dispatch,
-            "monitor.check_completed",
-            "read_only_probe",
-            "info",
-            std::move(payload)));
+            event_envelope(
+                dispatch,
+                "monitor.check_completed",
+                "deterministic_check_completed",
+                "info",
+                std::move(payload)));
+    } else {
+        if (!dispatch.issue_id.empty()) {
+            auto action_payload = payload;
+            action_payload["action_type"] = execution.handler;
+            action_payload["success"] = true;
+            append_event_if_missing(
+                paths,
+                dispatch,
+                event_envelope(
+                    dispatch,
+                    "issue.action_applied",
+                    "deterministic_action_applied",
+                    "info",
+                    std::move(action_payload)));
+        }
+
+        payload["action_type"] = execution.handler;
+        payload["success"] = true;
+        append_event_if_missing(
+            paths,
+            dispatch,
+            event_envelope(
+                dispatch,
+                "task.restarted",
+                "task_restarted",
+                "info",
+                std::move(payload)));
+    }
 
     WorkerReceipt receipt;
     receipt.dispatch_id = dispatch.dispatch_id;
@@ -656,7 +694,7 @@ void run_l1_probe(
     receipt.project_id = dispatch.project_id;
     receipt.authority = dispatch.authority;
     receipt.state = "completed";
-    receipt.reason = "built-in read_only_probe completed";
+    receipt.reason = execution.summary;
     receipt.updated_at = iso_now_local();
     record_receipt(paths, result, std::move(receipt));
 }
@@ -887,6 +925,9 @@ std::optional<DispatchRecord> load_dispatch_record(
     dispatch.action_id = str(root.if_contains("action_id"));
     dispatch.dispatch_kind = str(root.if_contains("dispatch_kind"));
     dispatch.handler = str(root.if_contains("handler"));
+    if (const auto* handler_config =
+            object(root.if_contains("handler_config")))
+        dispatch.handler_config = *handler_config;
     dispatch.agent_profile = str(root.if_contains("agent_profile"));
     dispatch.constraints =
         string_array(root.if_contains("constraints"));
@@ -1015,29 +1056,7 @@ DispatchWorkerResult run_dispatch_workers(
             continue;
         }
 
-        if (dispatch->handler == "read_only_probe") {
-            run_l1_probe(paths, *dispatch, result);
-        } else {
-            const auto reason =
-                "No audited L1 worker is registered for handler: " +
-                dispatch->handler;
-            emit_escalation(
-                paths,
-                *dispatch,
-                "unsupported_l1_handler",
-                reason,
-                "unsupported_handler");
-
-            WorkerReceipt receipt;
-            receipt.dispatch_id = dispatch->dispatch_id;
-            receipt.command_id = dispatch->command_id;
-            receipt.project_id = dispatch->project_id;
-            receipt.authority = dispatch->authority;
-            receipt.state = "failed";
-            receipt.reason = reason;
-            receipt.updated_at = iso_now_local();
-            record_receipt(paths, result, std::move(receipt));
-        }
+        run_l1_handler(paths, *dispatch, result);
     }
 
     for (const auto& path : dispatch_files(paths, "l2")) {
