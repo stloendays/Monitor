@@ -209,7 +209,7 @@ void set_usage_bar(QProgressBar* bar,
         bar->setValue(value);
         bar->setFormat(QStringLiteral("%1%").arg(value));
         label->setText(
-            QStringLiteral("%1 · %2% · %3")
+            QStringLiteral("%1 · 已用 %2% · 重置 %3")
                 .arg(name)
                 .arg(value)
                 .arg(usage_reset_text(window.resets_at)));
@@ -217,7 +217,7 @@ void set_usage_bar(QProgressBar* bar,
         bar->setValue(0);
         bar->setFormat(QStringLiteral("—"));
         label->setText(
-            QStringLiteral("%1 · 用量未知 · %2")
+            QStringLiteral("%1 · 用量未知 · 重置 %2")
                 .arg(name)
                 .arg(usage_reset_text(window.resets_at)));
     }
