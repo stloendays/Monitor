@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.24)
-project(MonitorHubCpp VERSION 0.1.0 LANGUAGES CXX)
+
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" MONITOR_HUB_VERSION LIMIT_COUNT 1)
+string(STRIP "${MONITOR_HUB_VERSION}" MONITOR_HUB_VERSION)
+if(NOT MONITOR_HUB_VERSION MATCHES "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")
+    message(FATAL_ERROR "Invalid root VERSION: '${MONITOR_HUB_VERSION}'")
+endif()
+
+project(MonitorHubCpp VERSION ${MONITOR_HUB_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -25,6 +32,10 @@ target_include_directories(monitor_hub_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${Boost_INCLUDE_DIRS}
+)
+target_compile_definitions(
+    monitor_hub_core
+    PUBLIC MONITOR_HUB_VERSION="${PROJECT_VERSION}"
 )
 if(WIN32)
     target_link_libraries(monitor_hub_core PRIVATE taskschd wbemuuid ole32 oleaut32)
@@ -89,7 +100,6 @@ if(MONITOR_HUB_BUILD_QT)
             Qt6::Network
     )
     add_dependencies(monitor_hub_qt monitor_hub_orchestrator)
-    target_compile_definitions(monitor_hub_qt PRIVATE MONITOR_HUB_VERSION="${PROJECT_VERSION}")
     if(MSVC)
         target_compile_options(monitor_hub_qt PRIVATE /W4 /permissive- /utf-8)
     else()

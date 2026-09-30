@@ -17,6 +17,7 @@ int main(int argc, char** argv) {
         monitor_hub::SystemInfo system;
         bool system_fixture = false;
         bool dump = false;
+        bool show_version = false;
         bool probe_system = false;
         bool claude_statusline = false;
         bool notifications = false;
@@ -27,6 +28,7 @@ int main(int argc, char** argv) {
         for (int i = 1; i < argc; ++i) {
             const std::string arg = argv[i];
             if (arg == "--dump") dump = true;
+            else if (arg == "--version") show_version = true;
             else if (arg == "--probe-system") probe_system = true;
             else if (arg == "--claude-statusline") claude_statusline = true;
             else if (arg == "--notifications") notifications = true;
@@ -54,6 +56,7 @@ int main(int argc, char** argv) {
                 std::cout
                     << "monitor_hub_cli ACTION [--registry FILE] [--hub-data DIR] [--job-root DIR] [--no-discovery] [--system-info FILE]\n"
                        "Actions:\n"
+                       "  --version                 Print the release version and exit.\n"
                        "  --dump                    Dump normalized Monitor Hub state as JSON.\n"
                        "  --probe-system            Dump the raw read-only Task Scheduler/WMI probe as JSON.\n"
                        "  --claude-statusline       Read Claude Code statusLine JSON from stdin, write a sanitized local snapshot, and print the compact status line.\n"
@@ -73,16 +76,22 @@ int main(int argc, char** argv) {
 
         const int actions =
             (dump ? 1 : 0) +
+            (show_version ? 1 : 0) +
             (probe_system ? 1 : 0) +
             (claude_statusline ? 1 : 0) +
             (notifications ? 1 : 0) +
             (acknowledge_id ? 1 : 0);
         if (actions != 1) {
             std::cerr
-                << "choose exactly one action: --dump, --probe-system, "
+                << "choose exactly one action: --version, --dump, --probe-system, "
                    "--claude-statusline, --notifications, --notifications-all, "
                    "or --ack-notification ID\n";
             return 2;
+        }
+
+        if (show_version) {
+            std::cout << MONITOR_HUB_VERSION << "\n";
+            return 0;
         }
 
         if (probe_system) {

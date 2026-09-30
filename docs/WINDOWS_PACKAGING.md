@@ -201,3 +201,43 @@ portable / installer / updater payload
 ```
 
 CI may still add a dedicated smoke test for the new executable when its behavior is important, but the artifact must not be missing simply because the outer workflow did not enumerate the target name.
+
+
+## Stable Release workflow
+
+Stable releases use the root `VERSION` file as the single authoritative SemVer source.
+
+The release sequence is:
+
+```text
+feature PRs
+-> dependency-order merge into main
+-> release PR updates VERSION + release notes
+-> release PR runs candidate build/package/install validation
+-> merge release PR into main
+-> Stable Release workflow validates main + VERSION
+-> build/test/package
+-> create vX.Y.Z tag at the validated main commit
+-> publish GitHub Release assets
+```
+
+The workflow requires:
+
+- `VERSION` to be strict `MAJOR.MINOR.PATCH`;
+- matching `docs/releases/vX.Y.Z.md`;
+- the publishing commit to be on `main`;
+- no pre-existing tag with the same version;
+- compiled `monitor_hub_cli --version` to equal `VERSION`;
+- CMake project version to equal `VERSION`;
+- staged release marker and updater manifest version to equal `VERSION`;
+- CTest, Windows packaging and installed-package smoke to pass.
+
+Published stable assets are:
+
+1. `Monitor-Hub-X.Y.Z-win64-setup.exe` — recommended normal-user installer;
+2. `Monitor-Hub-X.Y.Z-win64-portable.zip` — portable/manual distribution;
+3. `monitor-hub-windows-x64.zip` — stable updater payload;
+4. `monitor-hub-windows-x64.zip.sha256` — updater archive checksum;
+5. `SHA256SUMS.txt` — release-level checksums for the main downloadable assets.
+
+Feature PRs and release PRs can generate candidate artifacts, but only the stable workflow on `main` is allowed to publish a GitHub Release.
