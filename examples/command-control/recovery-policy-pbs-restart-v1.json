@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "policy_id": "example-pbs-restart-v1",
+  "project_id": "example-project",
+  "actions": [
+    {
+      "action_id": "restart_pbs_same_parameters",
+      "authority": "L1",
+      "dispatch_kind": "deterministic",
+      "handler": "pbs_qsub_restart_v1",
+      "handler_config": {
+        "script_path": "/home/user/project/restart.pbs",
+        "working_directory": "/home/user/project"
+      },
+      "allowed_command_types": [
+        "task.restart.requested"
+      ],
+      "constraints": [
+        "PBS script path is fixed by policy",
+        "reuse validated checkpoint",
+        "do not change scientific parameters",
+        "do not delete existing outputs"
+      ],
+      "completion_criteria": [
+        "qsub accepts the pre-authorized submission script",
+        "monitor later observes the replacement PBS job"
+      ],
+      "enabled": true
+    }
+  ]
+}
