@@ -142,4 +142,22 @@ if(BUILD_TESTING)
         COMMAND monitor_hub_deterministic_handler_tests
                 $<TARGET_FILE:monitor_hub_handler_fixture>
     )
+
+    add_executable(
+        monitor_hub_setup_policy_bootstrap_tests
+        tests/setup_policy_bootstrap_tests.cpp
+    )
+    target_link_libraries(
+        monitor_hub_setup_policy_bootstrap_tests
+        PRIVATE monitor_hub_core
+    )
+    add_test(
+        NAME monitor_hub_setup_policy_bootstrap_tests
+        COMMAND monitor_hub_setup_policy_bootstrap_tests
+    )
+
+    add_test(
+        NAME monitor_hub_registered_handlers_cli
+        COMMAND monitor_hub_control --registered-handlers
+    )
 endif()

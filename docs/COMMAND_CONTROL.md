@@ -186,11 +186,25 @@ Process all unprocessed commands:
 monitor_hub_control --dispatch-once
 ```
 
-Print a policy example:
+Print a portable policy example:
 
 ```powershell
 monitor_hub_control --policy-example
 ```
+
+Discover deterministic handlers compiled into this Monitor Hub build:
+
+```powershell
+monitor_hub_control --registered-handlers
+```
+
+Validate a generated policy before enabling automation:
+
+```powershell
+monitor_hub_control --validate-policy-ref policies/my-project-recovery-v1 --hub-data D:\\MonitorHubData
+```
+
+Policy validation returns machine-readable JSON and exits non-zero when the policy is invalid.
 
 Override Hub Data for testing or isolated deployments:
 
