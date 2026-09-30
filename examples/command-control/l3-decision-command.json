@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "command_id": "cmd_example_method_decision_001",
+  "command_type": "project.method_change.requested",
+  "requested_at": "2026-09-30T12:10:00+08:00",
+  "project_id": "example-project",
+  "task_id": "task-001",
+  "issue_id": "iss-task-001",
+  "correlation_id": "corr-task-001",
+  "requested_by": {
+    "kind": "child_agent",
+    "id": "bounded-troubleshooter"
+  },
+  "authority": "L3",
+  "constraints": [
+    "do not choose among scientifically different methods automatically"
+  ],
+  "completion_criteria": [
+    "main Agent or user records an explicit decision"
+  ],
+  "context_refs": [
+    "D:/Research/Example/task-001/analysis.md"
+  ],
+  "payload": {
+    "summary": "Two scientifically different recovery methods require a project-level decision."
+  }
+}

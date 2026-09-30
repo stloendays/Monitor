@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "policy_id": "example-project-recovery-v1",
+  "project_id": "example-project",
+  "actions": [
+    {
+      "action_id": "restart_same_parameters",
+      "authority": "L1",
+      "dispatch_kind": "deterministic",
+      "handler": "restart_same_parameters",
+      "allowed_command_types": [
+        "task.restart.requested"
+      ],
+      "constraints": [
+        "reuse validated checkpoint",
+        "do not change scientific parameters",
+        "do not delete existing outputs"
+      ],
+      "completion_criteria": [
+        "replacement job is submitted",
+        "monitor observes the replacement job"
+      ],
+      "enabled": true
+    },
+    {
+      "action_id": "troubleshoot_known_failure",
+      "authority": "L2",
+      "dispatch_kind": "child_agent",
+      "agent_profile": "bounded-troubleshooter",
+      "allowed_command_types": [
+        "agent.troubleshoot.request"
+      ],
+      "constraints": [
+        "read project governance first",
+        "do not change scientific method",
+        "do not create new project scope",
+        "escalate unresolved uncertainty to L3"
+      ],
+      "completion_criteria": [
+        "evidence and analysis are recorded",
+        "bounded action is queued or L3 escalation is emitted"
+      ],
+      "enabled": true
+    }
+  ]
+}

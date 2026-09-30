@@ -77,5 +77,16 @@ jobs:
           if ($probe.error) {
             throw "live Windows probe reported an error: $($probe.error)"
           }
+      - name: Command control CLI smoke
+        shell: pwsh
+        run: |
+          $output = .\cpp\build\Release\monitor_hub_control.exe --policy-example
+          if ($LASTEXITCODE -ne 0) {
+            throw "monitor_hub_control --policy-example failed with exit code $LASTEXITCODE"
+          }
+          $policy = ($output -join [Environment]::NewLine) | ConvertFrom-Json
+          if ($policy.schema_version -ne 1 -or -not $policy.policy_id -or -not $policy.actions) {
+            throw "monitor_hub_control policy example did not satisfy the expected v1 shape"
+          }
       - name: Test
         run: ctest --test-dir cpp/build -C Release --output-on-failure
