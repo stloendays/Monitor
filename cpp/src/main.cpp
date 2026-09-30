@@ -62,7 +62,8 @@ int main(int argc, char** argv) {
                        "  --ack-notification ID     Acknowledge one durable notification.\n"
                        "  --notification-actor NAME Actor recorded for --ack-notification (default: main_agent).\n"
                        "\n"
-                       "Without --system-info, --dump probes Windows Task Scheduler and Win32_Process live through COM/WMI.\n";
+                       "Without --system-info, --dump and --probe-system read Windows Task Scheduler and Win32_Process live through COM/WMI.\n"
+                       "--probe-system is raw platform evidence; --dump is the normalized Monitor Hub projection.\n";
                 return 0;
             } else {
                 std::cerr << "unknown argument: " << arg << "\n";
