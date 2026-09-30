@@ -6,6 +6,8 @@
 #include <QBrush>
 #include <QClipboard>
 #include <QColor>
+#include <QCoreApplication>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QFontDatabase>
 #include <QFrame>
@@ -13,6 +15,7 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QPixmap>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTableWidget>
@@ -22,6 +25,7 @@
 #include <QTextEdit>
 #include <QTimer>
 #include <QUrl>
+#include <QFileInfo>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QWidget>
@@ -140,6 +144,70 @@ void set_health_badge(QLabel* label, const std::string& health) {
     label->update();
 }
 
+QString usage_reset_text(const std::optional<double>& epoch) {
+    if (!epoch) return QStringLiteral("重置时间未知");
+    const auto seconds = static_cast<qint64>(*epoch);
+    const auto when = QDateTime::fromSecsSinceEpoch(seconds).toLocalTime();
+    const auto now = QDateTime::currentDateTime();
+    if (when.date() == now.date())
+        return QStringLiteral("今天 %1").arg(when.toString(QStringLiteral("HH:mm")));
+    if (when.date() == now.date().addDays(1))
+        return QStringLiteral("明天 %1").arg(when.toString(QStringLiteral("HH:mm")));
+    return when.toString(QStringLiteral("MM-dd HH:mm"));
+}
+
+QString observed_text(const std::optional<double>& epoch) {
+    if (!epoch) return QStringLiteral("还没有收到 CLI 用量快照");
+    const auto seconds = static_cast<qint64>(*epoch);
+    const auto when = QDateTime::fromSecsSinceEpoch(seconds).toLocalTime();
+    return QStringLiteral("数据更新 %1").arg(when.toString(QStringLiteral("MM-dd HH:mm:ss")));
+}
+
+QString claude_bridge_path() {
+    const auto explicit_path = qEnvironmentVariable("MONITOR_HUB_CLAUDE_BRIDGE");
+    if (!explicit_path.isEmpty() && QFileInfo::exists(explicit_path))
+        return explicit_path;
+
+    const auto app_dir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QStringLiteral(R"(D:\Research\Monitor\hub\claude_statusline_bridge.py)"),
+        app_dir + QStringLiteral("/../share/monitor_hub/claude_statusline_bridge.py"),
+        app_dir + QStringLiteral("/../../hub/claude_statusline_bridge.py"),
+        app_dir + QStringLiteral("/../../../hub/claude_statusline_bridge.py"),
+    };
+    for (const auto& path : candidates)
+        if (QFileInfo::exists(path)) return QFileInfo(path).absoluteFilePath();
+
+    // Preserve the user's established repository layout as the copyable fallback.
+    return QStringLiteral(R"(D:\Research\Monitor\hub\claude_statusline_bridge.py)");
+}
+
+void set_usage_bar(QProgressBar* bar,
+                   QLabel* label,
+                   const QString& name,
+                   const ClaudeUsageWindow& window) {
+    if (!bar || !label) return;
+    bar->setRange(0, 100);
+    if (window.used_percentage) {
+        const auto value = std::clamp(
+            static_cast<int>(*window.used_percentage + 0.5), 0, 100);
+        bar->setValue(value);
+        bar->setFormat(QStringLiteral("%1%").arg(value));
+        label->setText(
+            QStringLiteral("%1 · %2% · %3")
+                .arg(name)
+                .arg(value)
+                .arg(usage_reset_text(window.resets_at)));
+    } else {
+        bar->setValue(0);
+        bar->setFormat(QStringLiteral("—"));
+        label->setText(
+            QStringLiteral("%1 · 用量未知 · %2")
+                .arg(name)
+                .arg(usage_reset_text(window.resets_at)));
+    }
+}
+
 QPushButton* info_button(const QString& tooltip, QWidget* parent) {
     auto* button = new QPushButton(QStringLiteral("ⓘ"), parent);
     button->setObjectName(QStringLiteral("infoButton"));
@@ -226,6 +294,89 @@ void QtMainWindow::build_ui() {
         if (!item) return;
         select_project(item->data(Qt::UserRole).toString().toUtf8().toStdString());
     });
+
+    auto* claude_card = new QFrame(sidebar);
+    claude_card->setObjectName(QStringLiteral("claudeCard"));
+    claude_card->setFrameShape(QFrame::NoFrame);
+    auto* claude_layout = new QVBoxLayout(claude_card);
+    claude_layout->setContentsMargins(11, 10, 11, 10);
+    claude_layout->setSpacing(6);
+
+    auto* claude_head = new QHBoxLayout();
+    auto* claude_title = new QLabel(QStringLiteral("Claude CLI"), claude_card);
+    claude_title->setObjectName(QStringLiteral("sectionLabel"));
+    claude_head->addWidget(claude_title);
+    claude_cli_state_ = new QLabel(claude_card);
+    claude_cli_state_->setObjectName(QStringLiteral("claudeState"));
+    claude_head->addWidget(claude_cli_state_);
+    claude_head->addStretch();
+    claude_head->addWidget(info_button(
+        QStringLiteral("用量优先来自 Claude Code statusLine 自带的 rate_limits："
+                       "5 小时和 7 天 used_percentage + resets_at。"
+                       "Monitor Hub 不读取 OAuth token，也不会为了查额度额外调用模型。"),
+        claude_card));
+    claude_layout->addLayout(claude_head);
+
+    claude_cli_meta_ = new QLabel(claude_card);
+    claude_cli_meta_->setObjectName(QStringLiteral("mutedText"));
+    claude_cli_meta_->setWordWrap(true);
+    claude_layout->addWidget(claude_cli_meta_);
+
+    claude_five_text_ = new QLabel(QStringLiteral("5 小时 · 等待数据"), claude_card);
+    claude_five_text_->setObjectName(QStringLiteral("usageText"));
+    claude_layout->addWidget(claude_five_text_);
+    claude_five_bar_ = new QProgressBar(claude_card);
+    claude_five_bar_->setObjectName(QStringLiteral("usageBar"));
+    claude_five_bar_->setTextVisible(true);
+    claude_layout->addWidget(claude_five_bar_);
+
+    claude_seven_text_ = new QLabel(QStringLiteral("7 天 · 等待数据"), claude_card);
+    claude_seven_text_->setObjectName(QStringLiteral("usageText"));
+    claude_layout->addWidget(claude_seven_text_);
+    claude_seven_bar_ = new QProgressBar(claude_card);
+    claude_seven_bar_->setObjectName(QStringLiteral("usageBar"));
+    claude_seven_bar_->setTextVisible(true);
+    claude_layout->addWidget(claude_seven_bar_);
+
+    claude_updated_ = new QLabel(claude_card);
+    claude_updated_->setObjectName(QStringLiteral("brandSubtitle"));
+    claude_updated_->setWordWrap(true);
+    claude_layout->addWidget(claude_updated_);
+
+    auto* claude_actions = new QHBoxLayout();
+    claude_actions->setSpacing(5);
+    claude_setup_ = new QPushButton(QStringLiteral("接入用量"), claude_card);
+    claude_setup_->setProperty("role", QStringLiteral("quick"));
+    claude_setup_->setToolTip(
+        QStringLiteral("复制一条 /statusline 配置指令。粘贴到 Claude CLI 后，"
+                       "Claude 自己的状态栏会把用量快照同步给 Monitor Hub。"));
+    claude_config_ = new QPushButton(QStringLiteral("CLI 配置"), claude_card);
+    claude_config_->setProperty("role", QStringLiteral("quick"));
+    claude_config_->setToolTip(
+        QStringLiteral("打开当前 CLAUDE_CONFIG_DIR（默认 ~/.claude）或 settings.json。"));
+    claude_usage_ = new QPushButton(QStringLiteral("复制 /usage"), claude_card);
+    claude_usage_->setProperty("role", QStringLiteral("quick"));
+    claude_usage_->setToolTip(
+        QStringLiteral("复制 Claude Code 官方 /usage 命令；可在终端里查看完整计划用量。"));
+    claude_actions->addWidget(claude_setup_);
+    claude_actions->addWidget(claude_config_);
+    claude_actions->addWidget(claude_usage_);
+    claude_actions->addStretch();
+    claude_layout->addLayout(claude_actions);
+
+    connect(claude_setup_, &QPushButton::clicked, this, [this] {
+        copy_claude_statusline_setup();
+    });
+    connect(claude_config_, &QPushButton::clicked, this, [this] {
+        open_claude_config();
+    });
+    connect(claude_usage_, &QPushButton::clicked, this, [this] {
+        QApplication::clipboard()->setText(QStringLiteral("/usage"));
+        if (claude_updated_) claude_updated_->setText(QStringLiteral("已复制 /usage"));
+        QTimer::singleShot(2200, this, [this] { render_claude_cli_status(); });
+    });
+
+    side_layout->addWidget(claude_card);
 
     auto* main = new QWidget(central);
     main->setObjectName(QStringLiteral("mainPane"));
@@ -726,6 +877,7 @@ void QtMainWindow::refresh() {
     render_sidebar();
     render_project();
     render_context_header();
+    render_claude_cli_status();
     refresh_quick_actions();
 }
 
@@ -800,6 +952,66 @@ void QtMainWindow::render_context_header() {
 
     const auto* runner = object(snap->if_contains("runner"));
     runner_->setText(runner ? q(s(runner->if_contains("text"))) : QString{});
+}
+
+void QtMainWindow::render_claude_cli_status() {
+    if (!claude_cli_state_ || !claude_cli_meta_ ||
+        !claude_five_bar_ || !claude_seven_bar_) {
+        return;
+    }
+
+    const auto status = load_claude_cli_status(system_, paths_);
+
+    QString state;
+    if (!status.source.empty()) {
+        state = status.running_processes > 0
+            ? QStringLiteral("● 已连接")
+            : QStringLiteral("● 已接入");
+    } else if (status.cli_found || status.running_processes > 0) {
+        state = QStringLiteral("○ 待接用量");
+    } else {
+        state = QStringLiteral("○ 未发现");
+    }
+    claude_cli_state_->setText(state);
+
+    QStringList meta;
+    if (!status.model.empty()) meta << q(status.model);
+    if (!status.version.empty()) meta << QStringLiteral("v") + q(status.version);
+    if (status.running_processes > 0)
+        meta << QStringLiteral("%1 个 CLI 进程").arg(status.running_processes);
+    else if (status.cli_found)
+        meta << QStringLiteral("CLI 已安装");
+    if (meta.isEmpty())
+        meta << QStringLiteral("等待 Claude CLI");
+    claude_cli_meta_->setText(meta.join(QStringLiteral(" · ")));
+
+    set_usage_bar(
+        claude_five_bar_,
+        claude_five_text_,
+        QStringLiteral("5 小时"),
+        status.five_hour);
+    set_usage_bar(
+        claude_seven_bar_,
+        claude_seven_text_,
+        QStringLiteral("7 天"),
+        status.seven_day);
+
+    QString updated = observed_text(status.observed_at);
+    if (!status.source.empty()) {
+        updated += status.source == "claude_statusline"
+            ? QStringLiteral(" · statusLine")
+            : QStringLiteral(" · 后台 Claude 快照");
+    }
+    if (status.context_used_percentage)
+        updated += QStringLiteral(" · ctx %1%")
+                       .arg(static_cast<int>(*status.context_used_percentage + 0.5));
+    claude_updated_->setText(updated);
+    claude_updated_->setToolTip(
+        QStringLiteral("用量缓存：%1\nClaude 配置：%2")
+            .arg(q(status.status_file.string()))
+            .arg(q(status.config_dir.string())));
+
+    claude_config_->setEnabled(!status.config_dir.empty());
 }
 
 void QtMainWindow::refresh_quick_actions() {
@@ -1147,6 +1359,25 @@ void QtMainWindow::render_task_detail() {
     open_result_->setEnabled(meta && local_exists(s(meta->if_contains("result"))));
     copy_command_->setEnabled(meta && !s(meta->if_contains("command")).empty());
     refresh_quick_actions();
+}
+
+void QtMainWindow::copy_claude_statusline_setup() {
+    const auto bridge = claude_bridge_path();
+    const auto command =
+        QStringLiteral("/statusline 使用下面这个命令作为 Claude Code 状态栏命令，并保留它的 stdout 作为可见状态栏： python \"%1\"")
+            .arg(bridge);
+    QApplication::clipboard()->setText(command);
+    if (claude_updated_)
+        claude_updated_->setText(QStringLiteral("接入指令已复制，粘贴到 Claude CLI"));
+    QTimer::singleShot(3200, this, [this] { render_claude_cli_status(); });
+}
+
+void QtMainWindow::open_claude_config() {
+    const auto status = load_claude_cli_status(system_, paths_);
+    if (status.config_dir.empty()) return;
+    const auto settings = status.config_dir / "settings.json";
+    if (local_exists(settings.string())) open_local(settings.string());
+    else if (local_exists(status.config_dir.string())) open_local(status.config_dir.string());
 }
 
 void QtMainWindow::open_task_target(const std::string& key) {
