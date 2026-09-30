@@ -14,7 +14,8 @@ Packaging a PR does **not** publish a GitHub Release. Stable publishing remains 
 
 ## Staged install layout
 
-The CMake install tree is the source of truth:
+The CMake install tree is the source of truth. Before staging, `package_qt.ps1` performs an incremental build of the configured CMake build tree so every install target actually exists. This avoids packaging failures when new installed CLI/worker executables are added without being named explicitly in the outer CI build step.
+
 
 ```text
 stage/
@@ -115,18 +116,19 @@ On uninstall, the installer removes the optional `Monitor Hub` Run entry if pres
 
 The Windows Qt workflow should validate the package, not just the developer build tree:
 
-1. build Qt + CLI;
-2. stage CMake install;
-3. run `windeployqt`;
-4. stage app-local MSVC x64 CRT DLLs and smoke-test the staged executable;
-5. generate update ZIP + checksum;
-6. generate portable ZIP;
-7. compile NSIS installer;
-8. silently install into a temporary path;
-9. run installed `monitor_hub_qt.exe --desktop-diagnostics`;
-10. silently uninstall;
-11. verify the installed executable was removed;
-12. upload PR artifacts for inspection.
+1. build the fast-path Qt + CLI targets;
+2. let `package_qt.ps1` incrementally build all configured targets required by the install tree;
+3. stage the CMake install;
+4. run `windeployqt`;
+5. stage app-local MSVC x64 CRT DLLs and smoke-test the staged executable;
+6. generate update ZIP + checksum;
+7. generate portable ZIP;
+8. compile NSIS installer;
+9. silently install into a temporary path;
+10. run installed `monitor_hub_qt.exe --desktop-diagnostics`;
+11. silently uninstall;
+12. verify the installed executable was removed;
+13. upload PR artifacts for inspection.
 
 ## Local packaging
 
@@ -178,3 +180,24 @@ The bundled `vc_redist.x64.exe` produced by some `windeployqt` versions is not t
 - the update payload must remain self-contained.
 
 A missing CRT Redist directory remains a packaging failure rather than being silently ignored.
+
+
+## New installed executables
+
+New executable targets that are part of the release layout should be declared with CMake `install(TARGETS ...)`.
+
+The packaging script intentionally performs an incremental default build before `cmake --install`, so a newly installed executable does **not** require a parallel edit to the Qt workflow's fast-path target list merely to exist in the staged package.
+
+This keeps the packaging contract source-driven:
+
+```text
+CMake target + install(TARGETS ...)
+        ↓
+package_qt.ps1 incremental build
+        ↓
+cmake --install
+        ↓
+portable / installer / updater payload
+```
+
+CI may still add a dedicated smoke test for the new executable when its behavior is important, but the artifact must not be missing simply because the outer workflow did not enumerate the target name.
