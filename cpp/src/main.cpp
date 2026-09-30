@@ -1,43 +1,120 @@
 #include "monitor_hub/core.hpp"
+#include "monitor_hub/notification_outbox.hpp"
 #include "monitor_hub/windows_probe.hpp"
 
 #include <boost/json.hpp>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 
 int main(int argc, char** argv) {
     try {
-        auto paths = monitor_hub::runtime_paths_from_env(argc > 0 ? std::filesystem::path(argv[0]) : std::filesystem::path{});
+        auto paths = monitor_hub::runtime_paths_from_env(
+            argc > 0 ? std::filesystem::path(argv[0])
+                     : std::filesystem::path{});
         monitor_hub::SystemInfo system;
         bool system_fixture = false;
         bool dump = false;
+        bool notifications = false;
+        bool include_acknowledged = false;
+        std::optional<std::string> acknowledge_id;
+        std::string acknowledge_actor = "main_agent";
+
         for (int i = 1; i < argc; ++i) {
             const std::string arg = argv[i];
             if (arg == "--dump") dump = true;
-            else if (arg == "--registry" && i + 1 < argc) paths.registry = argv[++i];
-            else if (arg == "--hub-data" && i + 1 < argc) paths.hub_data = argv[++i];
-            else if (arg == "--job-root" && i + 1 < argc) paths.job_root = argv[++i];
-            else if (arg == "--no-discovery") paths.discovery = false;
+            else if (arg == "--notifications") notifications = true;
+            else if (arg == "--notifications-all") {
+                notifications = true;
+                include_acknowledged = true;
+            }
+            else if (arg == "--ack-notification" && i + 1 < argc)
+                acknowledge_id = argv[++i];
+            else if (arg == "--notification-actor" && i + 1 < argc)
+                acknowledge_actor = argv[++i];
+            else if (arg == "--registry" && i + 1 < argc)
+                paths.registry = argv[++i];
+            else if (arg == "--hub-data" && i + 1 < argc)
+                paths.hub_data = argv[++i];
+            else if (arg == "--job-root" && i + 1 < argc)
+                paths.job_root = argv[++i];
+            else if (arg == "--no-discovery")
+                paths.discovery = false;
             else if (arg == "--system-info" && i + 1 < argc) {
                 system = monitor_hub::load_system_info_fixture(argv[++i]);
                 system_fixture = true;
             }
             else if (arg == "--help" || arg == "-h") {
-                std::cout << "monitor_hub_cli [--dump] [--registry FILE] [--hub-data DIR] [--job-root DIR] [--no-discovery] [--system-info FILE]\n"
-                             "  Without --system-info, Windows Task Scheduler and Win32_Process are probed live through COM/WMI.\n";
+                std::cout
+                    << "monitor_hub_cli ACTION [--registry FILE] [--hub-data DIR] [--job-root DIR] [--no-discovery] [--system-info FILE]\n"
+                       "Actions:\n"
+                       "  --dump                    Dump normalized Monitor Hub state as JSON.\n"
+                       "  --notifications           Sync event streams into the durable outbox and list unacknowledged notifications.\n"
+                       "  --notifications-all       Sync and list all notifications, including acknowledged records.\n"
+                       "  --ack-notification ID     Acknowledge one durable notification.\n"
+                       "  --notification-actor NAME Actor recorded for --ack-notification (default: main_agent).\n"
+                       "\n"
+                       "Without --system-info, --dump probes Windows Task Scheduler and Win32_Process live through COM/WMI.\n";
                 return 0;
             } else {
                 std::cerr << "unknown argument: " << arg << "\n";
                 return 2;
             }
         }
-        if (!dump) {
-            std::cerr << "the compatibility CLI currently requires --dump\n";
+
+        const int actions =
+            (dump ? 1 : 0) +
+            (notifications ? 1 : 0) +
+            (acknowledge_id ? 1 : 0);
+        if (actions != 1) {
+            std::cerr
+                << "choose exactly one action: --dump, --notifications, "
+                   "--notifications-all, or --ack-notification ID\n";
             return 2;
         }
-        if (!system_fixture) system = monitor_hub::probe_system_info();
-        std::cout << boost::json::serialize(monitor_hub::dump_all(system, paths)) << "\n";
+
+        if (notifications) {
+            const auto outbox =
+                monitor_hub::sync_notification_outbox(paths);
+            std::cout << boost::json::serialize(
+                monitor_hub::notification_outbox_to_json(
+                    outbox,
+                    include_acknowledged))
+                      << "\n";
+            return 0;
+        }
+
+        if (acknowledge_id) {
+            // Sync first so an Agent can acknowledge a just-emitted event
+            // without requiring a separate manual materialization step.
+            monitor_hub::sync_notification_outbox(paths);
+            const auto acknowledged = monitor_hub::acknowledge_notification(
+                paths,
+                *acknowledge_id,
+                acknowledge_actor);
+            if (!acknowledged) {
+                std::cerr
+                    << "notification not found: " << *acknowledge_id << "\n";
+                return 3;
+            }
+            const auto outbox =
+                monitor_hub::load_notification_outbox(paths);
+            boost::json::object response;
+            response["acknowledged"] = true;
+            response["notification_id"] = *acknowledge_id;
+            response["actor"] = acknowledge_actor;
+            response["outbox"] =
+                monitor_hub::notification_outbox_to_json(outbox, true);
+            std::cout << boost::json::serialize(response) << "\n";
+            return 0;
+        }
+
+        if (!system_fixture)
+            system = monitor_hub::probe_system_info();
+        std::cout << boost::json::serialize(
+            monitor_hub::dump_all(system, paths))
+                  << "\n";
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "monitor_hub_cli: " << e.what() << "\n";
