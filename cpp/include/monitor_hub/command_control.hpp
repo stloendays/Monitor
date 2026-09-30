@@ -33,6 +33,7 @@ struct PolicyAction {
     std::string authority;
     std::string dispatch_kind;
     std::string handler;
+    json::object handler_config;
     std::string agent_profile;
     std::vector<std::string> allowed_command_types;
     std::vector<std::string> constraints;

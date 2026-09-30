@@ -10,6 +10,7 @@ find_package(Boost 1.82 REQUIRED)
 add_library(monitor_hub_core
     src/core.cpp
     src/dispatch_worker.cpp
+    src/deterministic_handlers.cpp
     src/command_control.cpp
     src/event_store.cpp
     src/overview.cpp
@@ -121,5 +122,24 @@ if(BUILD_TESTING)
     add_test(
         NAME monitor_hub_dispatch_worker_tests
         COMMAND monitor_hub_dispatch_worker_tests
+    )
+
+    add_executable(
+        monitor_hub_handler_fixture
+        tests/handler_fixture.cpp
+    )
+
+    add_executable(
+        monitor_hub_deterministic_handler_tests
+        tests/deterministic_handler_tests.cpp
+    )
+    target_link_libraries(
+        monitor_hub_deterministic_handler_tests
+        PRIVATE monitor_hub_core
+    )
+    add_test(
+        NAME monitor_hub_deterministic_handler_tests
+        COMMAND monitor_hub_deterministic_handler_tests
+                $<TARGET_FILE:monitor_hub_handler_fixture>
     )
 endif()

@@ -145,6 +145,19 @@ Example:
 }
 ```
 
+### Policy-owned deterministic handler configuration
+
+L1 actions may carry an optional `handler_config` object. For registered restart handlers this object is the execution authority.
+
+```text
+command payload -> requested intent only
+policy handler_config -> executable/script/argv authority
+```
+
+The dispatcher copies `handler_config` from the selected policy action into the durable dispatch record. It never copies executable/script/argv values from the command payload into handler authority.
+
+Registered examples are documented in `docs/DETERMINISTIC_HANDLERS.md`.
+
 ### Policy invariants
 
 - `policy_ref` must be a relative `policies/...` path.
