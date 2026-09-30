@@ -7,15 +7,22 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 #include <QCryptographicHash>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QEvent>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QLabel>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QMenu>
 #include <QMessageBox>
+#include <QProcess>
 #include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QTimer>
@@ -43,6 +50,14 @@ QString concise_summary(const std::string& summary) {
     return text;
 }
 
+QString orchestrator_file_name() {
+#ifdef Q_OS_WIN
+    return QStringLiteral("monitor_hub_orchestrator.exe");
+#else
+    return QStringLiteral("monitor_hub_orchestrator");
+#endif
+}
+
 }  // namespace
 
 QtDesktopController::QtDesktopController(QtMainWindow& window, QObject* parent)
@@ -51,6 +66,14 @@ QtDesktopController::QtDesktopController(QtMainWindow& window, QObject* parent)
       settings_(load_desktop_settings()) {}
 
 QtDesktopController::~QtDesktopController() {
+    if (control_process_ &&
+        control_process_->state() != QProcess::NotRunning) {
+        control_process_->terminate();
+        if (!control_process_->waitForFinished(300)) {
+            control_process_->kill();
+            control_process_->waitForFinished(300);
+        }
+    }
     if (instance_server_ && instance_server_->isListening()) {
         instance_server_->close();
     }
@@ -128,6 +151,9 @@ bool QtDesktopController::install_system_tray(const QIcon& icon) {
     status_action_ = menu->addAction(QStringLiteral("状态初始化中"));
     status_action_->setEnabled(false);
 
+    control_action_ = menu->addAction(QStringLiteral("自动处理：初始化中"));
+    control_action_->setEnabled(false);
+
     menu->addSeparator();
     auto* settings_action = menu->addAction(QStringLiteral("设置…"));
     connect(settings_action, &QAction::triggered, this, [this] {
@@ -164,6 +190,13 @@ bool QtDesktopController::install_system_tray(const QIcon& icon) {
 void QtDesktopController::start(bool background_requested) {
     poll_project_notifications(true);
 
+    control_timer_ = new QTimer(this);
+    control_timer_->setInterval(60 * 1000);
+    connect(control_timer_, &QTimer::timeout, this, [this] {
+        start_control_tick();
+    });
+    apply_control_timer_state(true);
+
     if (tray_available()) {
         notification_timer_ = new QTimer(this);
         notification_timer_->setInterval(65 * 1000);
@@ -191,6 +224,11 @@ void QtDesktopController::show_main_window() {
 void QtDesktopController::request_quit() {
     force_quit_ = true;
     if (notification_timer_) notification_timer_->stop();
+    if (control_timer_) control_timer_->stop();
+    if (control_process_ &&
+        control_process_->state() != QProcess::NotRunning) {
+        control_process_->terminate();
+    }
     if (tray_) tray_->hide();
     QApplication::quit();
 }
@@ -236,6 +274,15 @@ void QtDesktopController::show_settings_dialog() {
             "仅通知需要处理、监控错误、状态过期、恢复处理中和项目完成等重要变化。"));
     layout->addWidget(notifications);
 
+    auto* automatic_control =
+        new QCheckBox(QStringLiteral("自动处理已授权的恢复任务（L1/L2）"), &dialog);
+    automatic_control->setChecked(current.automatic_control);
+    automatic_control->setToolTip(
+        QStringLiteral(
+            "每分钟运行一次全局控制面。只消费项目 recovery policy 已授权的命令；"
+            "L3 决策仍必须交给你或主 Agent。"));
+    layout->addWidget(automatic_control);
+
     auto* launch_at_login =
         new QCheckBox(QStringLiteral("登录 Windows 时自动启动 Monitor Hub"), &dialog);
     launch_at_login->setChecked(current.launch_at_login);
@@ -268,9 +315,13 @@ void QtDesktopController::show_settings_dialog() {
     if (dialog.exec() != QDialog::Accepted) return;
 
     QString error;
+    const bool automatic_control_changed =
+        automatic_control->isChecked() != current.automatic_control;
+
     if (!save_desktop_preferences(
             close_to_tray->isChecked(),
             notifications->isChecked(),
+            automatic_control->isChecked(),
             &error)) {
         QMessageBox::warning(
             window_,
@@ -292,6 +343,8 @@ void QtDesktopController::show_settings_dialog() {
     }
 
     settings_ = load_desktop_settings();
+    apply_control_timer_state(
+        automatic_control_changed && settings_.automatic_control);
 }
 
 void QtDesktopController::copy_diagnostics() {
@@ -299,6 +352,11 @@ void QtDesktopController::copy_diagnostics() {
     diagnostics += QStringLiteral("\ntray_available=%1")
                        .arg(tray_available() ? QStringLiteral("true")
                                              : QStringLiteral("false"));
+    diagnostics += QStringLiteral("\ncontrol_tick_running=%1")
+                       .arg(control_process_ ? QStringLiteral("true")
+                                             : QStringLiteral("false"));
+    diagnostics += QStringLiteral("\norchestrator=%1")
+                       .arg(QDir::toNativeSeparators(orchestrator_program()));
 
     QApplication::clipboard()->setText(diagnostics);
 
@@ -314,6 +372,202 @@ void QtDesktopController::copy_diagnostics() {
             QStringLiteral("Monitor Hub"),
             QStringLiteral("诊断信息已复制到剪贴板。"));
     }
+}
+
+QString QtDesktopController::orchestrator_program() const {
+    return QDir(QCoreApplication::applicationDirPath())
+        .filePath(orchestrator_file_name());
+}
+
+void QtDesktopController::set_control_status(const QString& text) {
+    if (control_action_) control_action_->setText(text);
+}
+
+void QtDesktopController::report_control_failure(const QString& detail) {
+    set_control_status(QStringLiteral("自动处理：异常"));
+    if (control_failure_active_) return;
+    control_failure_active_ = true;
+
+    if (settings_.notifications &&
+        tray_available() &&
+        QSystemTrayIcon::supportsMessages()) {
+        tray_->showMessage(
+            QStringLiteral("Monitor Hub · 自动处理异常"),
+            detail,
+            QSystemTrayIcon::Warning,
+            7000);
+    }
+}
+
+void QtDesktopController::apply_control_timer_state(bool run_immediately) {
+    if (!control_timer_) return;
+
+    if (!settings_.automatic_control) {
+        control_timer_->stop();
+        set_control_status(
+            control_process_
+                ? QStringLiteral("自动处理：已暂停（当前轮完成后）")
+                : QStringLiteral("自动处理：已暂停"));
+        return;
+    }
+
+    if (!control_timer_->isActive()) control_timer_->start();
+    if (!control_process_)
+        set_control_status(QStringLiteral("自动处理：等待下一轮"));
+
+    if (run_immediately) {
+        QTimer::singleShot(1200, this, [this] {
+            start_control_tick();
+        });
+    }
+}
+
+void QtDesktopController::start_control_tick() {
+    if (force_quit_ ||
+        !settings_.automatic_control ||
+        control_process_) {
+        return;
+    }
+
+    const auto program = orchestrator_program();
+    const QFileInfo executable(program);
+    if (!executable.exists() || !executable.isFile()) {
+        report_control_failure(
+            QStringLiteral(
+                "找不到控制面程序：%1。安装版应包含 monitor_hub_orchestrator；"
+                "开发版请构建 desktop targets。")
+                .arg(QDir::toNativeSeparators(program)));
+        return;
+    }
+
+    auto* process = new QProcess(this);
+    control_process_ = process;
+
+    const auto& paths = window_->runtime_paths();
+    QStringList arguments;
+    arguments
+        << QStringLiteral("--tick")
+        << QStringLiteral("--hub-data")
+        << q(paths.hub_data.string())
+        << QStringLiteral("--registry")
+        << q(paths.registry.string())
+        << QStringLiteral("--job-root")
+        << q(paths.job_root.string());
+
+    process->setProgram(program);
+    process->setArguments(arguments);
+    process->setProcessChannelMode(QProcess::SeparateChannels);
+    set_control_status(QStringLiteral("自动处理：处理中…"));
+
+    connect(
+        process,
+        &QProcess::errorOccurred,
+        this,
+        [this, process, program](QProcess::ProcessError error) {
+            if (error != QProcess::FailedToStart ||
+                process != control_process_) {
+                return;
+            }
+
+            const auto detail =
+                QStringLiteral("无法启动 %1：%2")
+                    .arg(
+                        QDir::toNativeSeparators(program),
+                        process->errorString());
+            control_process_ = nullptr;
+            report_control_failure(detail);
+            process->deleteLater();
+        });
+
+    connect(
+        process,
+        qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+        this,
+        [this, process](
+            int exit_code,
+            QProcess::ExitStatus exit_status) {
+            if (process != control_process_) {
+                process->deleteLater();
+                return;
+            }
+
+            const auto stdout_text =
+                QString::fromUtf8(
+                    process->readAllStandardOutput()).trimmed();
+            const auto stderr_text =
+                QString::fromUtf8(
+                    process->readAllStandardError()).trimmed();
+            control_process_ = nullptr;
+
+            if (exit_status != QProcess::NormalExit ||
+                exit_code != 0) {
+                report_control_failure(
+                    QStringLiteral(
+                        "控制面本轮失败（exit=%1）：%2")
+                        .arg(exit_code)
+                        .arg(
+                            stderr_text.isEmpty()
+                                ? stdout_text.right(1200)
+                                : stderr_text.right(1200)));
+                process->deleteLater();
+                return;
+            }
+
+            QJsonParseError parse_error;
+            const auto document =
+                QJsonDocument::fromJson(
+                    stdout_text.toUtf8(),
+                    &parse_error);
+            if (parse_error.error !=
+                    QJsonParseError::NoError ||
+                !document.isObject()) {
+                report_control_failure(
+                    QStringLiteral(
+                        "控制面返回了无效 JSON：%1")
+                        .arg(parse_error.errorString()));
+                process->deleteLater();
+                return;
+            }
+
+            const auto root = document.object();
+            const bool needs_main_agent =
+                root.value(QStringLiteral("needs_main_agent"))
+                    .toBool(false);
+            const auto outbox =
+                root.value(QStringLiteral("outbox")).toObject();
+            const int pending =
+                outbox.value(QStringLiteral("pending_count"))
+                    .toInt(0);
+
+            control_failure_active_ = false;
+            if (needs_main_agent) {
+                set_control_status(
+                    QStringLiteral("自动处理：等待决策 %1")
+                        .arg(pending));
+                if (!previous_needs_main_agent_ &&
+                    settings_.notifications &&
+                    tray_available() &&
+                    QSystemTrayIcon::supportsMessages()) {
+                    tray_->showMessage(
+                        QStringLiteral(
+                            "Monitor Hub · 需要你/主 Agent 处理"),
+                        QStringLiteral(
+                            "自动恢复控制面有 %1 个待确认事项。"
+                            "打开 Monitor Hub 可查看对应 Issue。")
+                            .arg(pending),
+                        QSystemTrayIcon::Warning,
+                        7000);
+                }
+            } else {
+                set_control_status(
+                    QStringLiteral("自动处理：运行正常"));
+            }
+            previous_needs_main_agent_ = needs_main_agent;
+
+            process->deleteLater();
+        });
+
+    process->start();
 }
 
 void QtDesktopController::poll_project_notifications(bool baseline_only) {
