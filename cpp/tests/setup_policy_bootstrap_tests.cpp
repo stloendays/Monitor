@@ -103,6 +103,30 @@ int main() {
         prompt.find("NEEDS_USER:") !=
         std::string::npos);
     CHECK(
+        prompt.find("monitor_hub_control --submit-command") !=
+        std::string::npos);
+    CHECK(
+        prompt.find("stable command_id") !=
+        std::string::npos);
+    CHECK(
+        prompt.find("same issue_id and correlation_id") !=
+        std::string::npos);
+    CHECK(
+        prompt.find("must not directly execute L1/L2 recovery") !=
+        std::string::npos);
+    CHECK(
+        prompt.find("global Monitor Hub control orchestrator") !=
+        std::string::npos);
+    CHECK(
+        prompt.find("issue.recovery_started") !=
+        std::string::npos);
+    CHECK(
+        prompt.find("issue.recovery_verified") !=
+        std::string::npos);
+    CHECK(
+        prompt.find("issue.resolved only when") !=
+        std::string::npos);
+    CHECK(
         prompt.find(paths.hub_data.string()) !=
         std::string::npos);
     CHECK(
