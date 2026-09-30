@@ -29,6 +29,21 @@ endif()
 add_executable(monitor_hub_cli src/main.cpp)
 target_link_libraries(monitor_hub_cli PRIVATE monitor_hub_core)
 
+option(MONITOR_HUB_BUILD_QT "Build the Qt 6 desktop UI" OFF)
+if(MONITOR_HUB_BUILD_QT)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
+    qt_add_executable(monitor_hub_qt WIN32
+        src/qt_main.cpp
+        src/qt_main_window.cpp
+    )
+    target_link_libraries(monitor_hub_qt PRIVATE monitor_hub_core Qt6::Widgets)
+    if(MSVC)
+        target_compile_options(monitor_hub_qt PRIVATE /W4 /permissive- /utf-8)
+    else()
+        target_compile_options(monitor_hub_qt PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(monitor_hub_core_tests tests/core_tests.cpp)

@@ -23,6 +23,10 @@ Still handled by Python and scheduled for later phases:
 - Qt 6 GUI;
 - management actions, read-only Q&A, and setup-agent launching.
 
+## Optional Qt 6 UI
+
+The read-only Qt desktop shell is available behind `MONITOR_HUB_BUILD_QT=ON`. It is intentionally optional so normal core CI does not install Qt. See `docs/QT_MIGRATION.md` for current UI scope and build instructions.
+
 ## Build on Windows
 
 Use MSVC 2022 and vcpkg:
