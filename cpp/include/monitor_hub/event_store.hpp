@@ -39,6 +39,7 @@ struct IssueProjection {
     std::string agent_run_id;
     std::string last_event_at;
     bool agent_active = false;
+    bool agent_completed = false;
     bool agent_failed = false;
     bool action_applied = false;
     bool task_restarted = false;
