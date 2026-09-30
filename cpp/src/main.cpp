@@ -17,6 +17,7 @@ int main(int argc, char** argv) {
         monitor_hub::SystemInfo system;
         bool system_fixture = false;
         bool dump = false;
+        bool probe_system = false;
         bool claude_statusline = false;
         bool notifications = false;
         bool include_acknowledged = false;
@@ -26,6 +27,7 @@ int main(int argc, char** argv) {
         for (int i = 1; i < argc; ++i) {
             const std::string arg = argv[i];
             if (arg == "--dump") dump = true;
+            else if (arg == "--probe-system") probe_system = true;
             else if (arg == "--claude-statusline") claude_statusline = true;
             else if (arg == "--notifications") notifications = true;
             else if (arg == "--notifications-all") {
@@ -53,6 +55,7 @@ int main(int argc, char** argv) {
                     << "monitor_hub_cli ACTION [--registry FILE] [--hub-data DIR] [--job-root DIR] [--no-discovery] [--system-info FILE]\n"
                        "Actions:\n"
                        "  --dump                    Dump normalized Monitor Hub state as JSON.\n"
+                       "  --probe-system            Dump the raw read-only Task Scheduler/WMI probe as JSON.\n"
                        "  --claude-statusline       Read Claude Code statusLine JSON from stdin, write a sanitized local snapshot, and print the compact status line.\n"
                        "  --notifications           Sync event streams into the durable outbox and list unacknowledged notifications.\n"
                        "  --notifications-all       Sync and list all notifications, including acknowledged records.\n"
@@ -69,14 +72,25 @@ int main(int argc, char** argv) {
 
         const int actions =
             (dump ? 1 : 0) +
+            (probe_system ? 1 : 0) +
             (claude_statusline ? 1 : 0) +
             (notifications ? 1 : 0) +
             (acknowledge_id ? 1 : 0);
         if (actions != 1) {
             std::cerr
-                << "choose exactly one action: --dump, --claude-statusline, "
-                   "--notifications, --notifications-all, or --ack-notification ID\n";
+                << "choose exactly one action: --dump, --probe-system, "
+                   "--claude-statusline, --notifications, --notifications-all, "
+                   "or --ack-notification ID\n";
             return 2;
+        }
+
+        if (probe_system) {
+            if (!system_fixture)
+                system = monitor_hub::probe_system_info();
+            std::cout << boost::json::serialize(
+                monitor_hub::system_info_json(system))
+                      << "\n";
+            return system.error.empty() ? 0 : 1;
         }
 
         if (claude_statusline) {
