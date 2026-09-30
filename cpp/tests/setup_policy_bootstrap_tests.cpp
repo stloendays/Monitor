@@ -3,6 +3,7 @@
 #include "monitor_hub/deterministic_handlers.hpp"
 #include "monitor_hub/setup_request.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
