@@ -68,6 +68,8 @@ private:
     QListWidget* project_list_ = nullptr;
     QLabel* claude_cli_state_ = nullptr;
     QLabel* claude_cli_meta_ = nullptr;
+    QLabel* claude_session_ = nullptr;
+    QLabel* claude_activity_ = nullptr;
     QLabel* claude_five_text_ = nullptr;
     QLabel* claude_seven_text_ = nullptr;
     QLabel* claude_updated_ = nullptr;
@@ -76,6 +78,8 @@ private:
     QPushButton* claude_setup_ = nullptr;
     QPushButton* claude_config_ = nullptr;
     QPushButton* claude_usage_ = nullptr;
+    QPushButton* claude_workspace_ = nullptr;
+    QPushButton* claude_transcript_ = nullptr;
 
     QLabel* title_ = nullptr;
     QLabel* area_ = nullptr;
