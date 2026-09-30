@@ -1193,18 +1193,16 @@ std::string command_policy_example() {
   "project_id": "example-project",
   "actions": [
     {
-      "action_id": "restart_same_parameters",
+      "action_id": "probe_context",
       "authority": "L1",
       "dispatch_kind": "deterministic",
-      "handler": "restart_same_parameters",
-      "allowed_command_types": ["task.restart.requested"],
+      "handler": "read_only_probe",
+      "allowed_command_types": ["monitor.probe.requested"],
       "constraints": [
-        "reuse validated checkpoint",
-        "do not change scientific parameters"
+        "read-only filesystem metadata only"
       ],
       "completion_criteria": [
-        "replacement job is submitted",
-        "monitor observes the replacement job"
+        "context reference metadata is recorded"
       ],
       "enabled": true
     },
