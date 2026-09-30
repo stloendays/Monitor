@@ -39,6 +39,9 @@ std::optional<SetupRequestFields> parse_setup_request_fields(
 
 SetupAgentRuntime setup_agent_runtime_from_env();
 
+std::vector<std::string> validate_setup_agent_runtime(
+    const SetupAgentRuntime& runtime);
+
 SetupRequestLaunch prepare_setup_request(
     const RuntimePaths& paths,
     const std::string& body,
