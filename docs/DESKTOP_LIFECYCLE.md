@@ -14,6 +14,8 @@ The desktop lifecycle layer is intentionally separate from monitoring/business l
 - an explicit **Quit** action that really terminates Monitor Hub;
 - an optional `--background` launch mode;
 - persistent important-notification preference;
+- persistent **automatic control-plane** preference;
+- one global asynchronous orchestrator tick every 60 seconds while automatic control is enabled;
 - project-health transition notifications sourced from the normalized Qt snapshot;
 - user-controlled Windows launch-at-login registration;
 - development-checkout protection so a `.git` working tree is never registered for startup;
@@ -36,6 +38,7 @@ launch
 → load desktop settings
 → create tray controller
 → baseline current project health without notification spam
+→ start one global policy-bounded control timer
 → show main window
 ```
 
@@ -44,7 +47,7 @@ Closing the main window with **关闭主窗口时继续在后台运行** enabled
 ```text
 close window
 → hide window
-→ monitoring continues
+→ monitoring and the global control timer continue
 → one-time tray notification explains that the app is still running
 ```
 
@@ -55,7 +58,8 @@ Explicit exit:
 ```text
 tray menu
 → Quit
-→ stop notification timer
+→ stop notification/control timers
+→ terminate the owned one-shot orchestrator process if one is still running
 → stop Qt application lifecycle
 ```
 
@@ -84,9 +88,36 @@ The tray menu exposes **设置…** with:
 
 - **关闭主窗口时继续在后台运行** — default on;
 - **显示重要桌面通知** — default on;
+- **自动处理已授权的恢复任务（L1/L2）** — default on;
 - **登录 Windows 时自动启动 Monitor Hub** — default off.
 
 Desktop preferences use `QSettings` under the current user.
+
+The automatic-control preference does not grant new authority. It only runs the
+global `monitor_hub_orchestrator --tick` companion against commands that already
+passed project policy:
+
+```text
+Qt background timer
+→ monitor_hub_orchestrator --tick
+→ policy dispatcher
+→ L1/L2 worker
+→ durable outbox
+```
+
+Only one tick process may be active at a time. If a previous tick is still running,
+the timer does not launch another one.
+
+The tray shows one of these coarse control states:
+
+- **等待下一轮**;
+- **处理中…**;
+- **运行正常**;
+- **等待决策 N**;
+- **异常**;
+- **已暂停**.
+
+L3 decisions remain user/main-Agent work even when automatic control is enabled.
 
 Windows launch-at-login uses the current user's Run key and launches:
 
@@ -124,7 +155,8 @@ logs or invent a separate health policy.
 
 The tray menu action **复制诊断信息** copies non-secret desktop runtime information
 such as version, Qt version, executable path, settings backend, development-checkout
-status and desktop preferences.
+status, desktop preferences, automatic-control state, companion executable path, and
+whether a control tick is currently running.
 
 The same read-only diagnostic path is available for CI/support:
 
@@ -138,6 +170,7 @@ It does not modify startup registration or settings.
 
 This phase does **not** yet add:
 
+- a Windows Task Scheduler fallback for control ticks when the Qt app is not running;
 - an application log file / log viewer;
 - issue-level and agent-run-level event notifications;
 - updater restart integration;
@@ -166,5 +199,9 @@ At minimum:
 13. Installed builds can opt into launch-at-login without administrator rights.
 14. Notification polling establishes a silent baseline before reporting transitions.
 15. The Qt window/tray and native Windows executable use repository-owned icon assets.
+16. Building `monitor_hub_qt` also builds the `monitor_hub_orchestrator` companion.
+17. Automatic control never overlaps two orchestrator processes in one desktop instance.
+18. Disabling automatic control stops future ticks without broadening or mutating project policies.
+19. Explicit Quit stops both desktop timers and the owned one-shot orchestrator process.
 
 The Windows packaging workflow now repeats diagnostics from a staged install and a silently installed NSIS build. Stable GitHub Release publishing remains a separate gated integration step.
