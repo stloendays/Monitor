@@ -24,6 +24,40 @@ QWidget#mainPane {
     background: transparent;
 }
 
+QDialog,
+QMessageBox {
+    background: #F7F6F2;
+}
+
+QCheckBox {
+    color: #393733;
+    spacing: 8px;
+    padding: 4px 0px;
+}
+
+QMenu {
+    color: #34322E;
+    background: #FFFFFF;
+    border: 1px solid #DDDAD3;
+    padding: 6px;
+}
+
+QMenu::item {
+    border-radius: 7px;
+    padding: 7px 24px 7px 10px;
+}
+
+QMenu::item:selected {
+    background: #ECEAE4;
+    color: #22211F;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: #ECEAE4;
+    margin: 5px 8px;
+}
+
 QWidget#contextHeader {
     background: #FFFFFF;
     border: 1px solid #E8E6E0;
