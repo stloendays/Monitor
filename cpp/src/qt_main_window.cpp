@@ -35,6 +35,7 @@
 #include <QWidget>
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <sstream>
 
