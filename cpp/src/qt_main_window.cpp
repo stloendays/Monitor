@@ -1,4 +1,5 @@
 #include "monitor_hub/qt_main_window.hpp"
+#include "monitor_hub/overview.hpp"
 #include "monitor_hub/windows_probe.hpp"
 
 #include <QApplication>
@@ -70,6 +71,13 @@ QString health_prefix(const std::string& health) {
     if (health == "paused") return QStringLiteral("⏸ ");
     if (health == "error") return QStringLiteral("✖ ");
     return QStringLiteral("● ");
+}
+
+QString agent_state_text(const std::string& state) {
+    if (state == "running") return QStringLiteral("处理中");
+    if (state == "ok") return QStringLiteral("已完成");
+    if (state == "failed") return QStringLiteral("失败");
+    return state.empty() ? QStringLiteral("—") : q(state);
 }
 
 bool local_exists(const std::string& path) {
@@ -185,6 +193,126 @@ void QtMainWindow::build_ui() {
 
     tabs_ = new QTabWidget(main);
 
+    // Cross-project operations overview.
+    auto* overview_tab = new QWidget(tabs_);
+    auto* overview_layout = new QVBoxLayout(overview_tab);
+    overview_layout->setContentsMargins(6, 6, 6, 6);
+    overview_layout->setSpacing(8);
+
+    auto* overview_head = new QHBoxLayout();
+    auto* overview_title = new QLabel(QStringLiteral("总览 · 控制塔"), overview_tab);
+    QFont overview_title_font = overview_title->font();
+    overview_title_font.setBold(true);
+    overview_title_font.setPointSize(overview_title_font.pointSize() + 2);
+    overview_title->setFont(overview_title_font);
+    overview_head->addWidget(overview_title);
+    overview_counts_ = new QLabel(overview_tab);
+    overview_counts_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    overview_head->addWidget(overview_counts_, 1);
+    overview_head->addWidget(info_button(
+        QStringLiteral("总览只汇总 normalized project snapshot 和 takeover 记录；"
+                       "不会从 raw log 自己推断业务状态。双击表格行可跳到对应项目。"),
+        overview_tab));
+    overview_layout->addLayout(overview_head);
+
+    auto* overview_projects_label = new QLabel(QStringLiteral("项目状态"), overview_tab);
+    QFont overview_section_font = overview_projects_label->font();
+    overview_section_font.setBold(true);
+    overview_projects_label->setFont(overview_section_font);
+    overview_layout->addWidget(overview_projects_label);
+
+    overview_projects_ = new QTableWidget(overview_tab);
+    overview_projects_->setColumnCount(4);
+    overview_projects_->setHorizontalHeaderLabels({
+        QStringLiteral("项目"),
+        QStringLiteral("状态"),
+        QStringLiteral("进度"),
+        QStringLiteral("当前情况"),
+    });
+    overview_projects_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    overview_projects_->setSelectionMode(QAbstractItemView::SingleSelection);
+    overview_projects_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    overview_projects_->verticalHeader()->setVisible(false);
+    overview_projects_->horizontalHeader()->setStretchLastSection(true);
+    overview_layout->addWidget(overview_projects_, 2);
+
+    auto* overview_attention_head = new QHBoxLayout();
+    auto* overview_attention_label = new QLabel(QStringLiteral("需要处理"), overview_tab);
+    overview_attention_label->setFont(overview_section_font);
+    overview_attention_head->addWidget(overview_attention_label);
+    overview_attention_head->addStretch();
+    overview_attention_head->addWidget(info_button(
+        QStringLiteral("这里只放需要用户/主 Agent 关注的项目级事项，以及监控错误或状态过期。"
+                       "普通运行日志不会进入这里。"),
+        overview_tab));
+    overview_layout->addLayout(overview_attention_head);
+
+    overview_attention_ = new QTableWidget(overview_tab);
+    overview_attention_->setColumnCount(3);
+    overview_attention_->setHorizontalHeaderLabels({
+        QStringLiteral("类型"),
+        QStringLiteral("项目"),
+        QStringLiteral("说明"),
+    });
+    overview_attention_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    overview_attention_->setSelectionMode(QAbstractItemView::SingleSelection);
+    overview_attention_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    overview_attention_->verticalHeader()->setVisible(false);
+    overview_attention_->horizontalHeader()->setStretchLastSection(true);
+    overview_layout->addWidget(overview_attention_, 1);
+
+    auto* overview_agent_head = new QHBoxLayout();
+    auto* overview_agent_label = new QLabel(QStringLiteral("最近 Agent Activity"), overview_tab);
+    overview_agent_label->setFont(overview_section_font);
+    overview_agent_head->addWidget(overview_agent_label);
+    overview_agent_head->addStretch();
+    overview_agent_head->addWidget(info_button(
+        QStringLiteral("跨项目汇总最近的 child-agent/takeover 记录。"
+                       "双击后进入对应项目的“后台处理记录”，再双击可打开原始证据文件。"),
+        overview_tab));
+    overview_layout->addLayout(overview_agent_head);
+
+    overview_agents_ = new QTableWidget(overview_tab);
+    overview_agents_->setColumnCount(4);
+    overview_agents_->setHorizontalHeaderLabels({
+        QStringLiteral("时间"),
+        QStringLiteral("项目"),
+        QStringLiteral("状态"),
+        QStringLiteral("摘要"),
+    });
+    overview_agents_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    overview_agents_->setSelectionMode(QAbstractItemView::SingleSelection);
+    overview_agents_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    overview_agents_->verticalHeader()->setVisible(false);
+    overview_agents_->horizontalHeader()->setStretchLastSection(true);
+    overview_layout->addWidget(overview_agents_, 2);
+
+    connect(overview_projects_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
+        auto* item = overview_projects_->item(row, 0);
+        if (!item) return;
+        const auto id = item->data(Qt::UserRole).toString().toUtf8().toStdString();
+        if (id.empty()) return;
+        select_project(id);
+        tabs_->setCurrentIndex(1);
+    });
+    connect(overview_attention_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
+        auto* item = overview_attention_->item(row, 1);
+        if (!item) return;
+        const auto id = item->data(Qt::UserRole).toString().toUtf8().toStdString();
+        if (id.empty()) return;
+        select_project(id);
+        tabs_->setCurrentIndex(1);
+    });
+    connect(overview_agents_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
+        auto* item = overview_agents_->item(row, 1);
+        if (!item) return;
+        const auto id = item->data(Qt::UserRole).toString().toUtf8().toStdString();
+        if (id.empty()) return;
+        select_project(id);
+        tabs_->setCurrentIndex(2);
+    });
+    tabs_->addTab(overview_tab, QStringLiteral("总览"));
+
     // Progress + task detail.
     auto* progress_tab = new QWidget(tabs_);
     auto* progress_layout = new QVBoxLayout(progress_tab);
@@ -289,6 +417,11 @@ void QtMainWindow::build_ui() {
     takeovers_->verticalHeader()->setVisible(false);
     takeovers_->horizontalHeader()->setStretchLastSection(true);
     takeover_layout->addWidget(takeovers_);
+    connect(takeovers_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
+        auto* item = takeovers_->item(row, 2);
+        if (!item) return;
+        open_local(item->data(Qt::UserRole).toString().toUtf8().toStdString());
+    });
     tabs_->addTab(takeover_tab, QStringLiteral("后台处理记录"));
 
     auto* result_tab = new QWidget(tabs_);
@@ -329,6 +462,7 @@ void QtMainWindow::refresh() {
     selected_project_ = keep_project;
     if (selected_project_.empty() || !snapshots_.count(selected_project_))
         selected_project_ = projects_.empty() ? std::string{} : s(projects_.front().if_contains("id"));
+    render_overview();
     render_sidebar();
     render_project();
 }
@@ -353,6 +487,87 @@ std::vector<QtDesktopProjectState> QtMainWindow::desktop_project_states() const 
     }
 
     return out;
+}
+
+void QtMainWindow::render_overview() {
+    if (!overview_counts_ || !overview_projects_ ||
+        !overview_attention_ || !overview_agents_) {
+        return;
+    }
+
+    const auto model = build_overview_model(projects_, snapshots_, 24);
+    const int needs_action =
+        model.attention_projects + model.error_projects + model.stale_projects;
+
+    QStringList counters;
+    counters << QStringLiteral("监控项目 %1").arg(model.total_projects);
+    if (needs_action > 0)
+        counters << QStringLiteral("需要处理 %1").arg(needs_action);
+    if (model.working_projects > 0)
+        counters << QStringLiteral("后台处理中 %1").arg(model.working_projects);
+    if (model.ok_projects > 0)
+        counters << QStringLiteral("正常 %1").arg(model.ok_projects);
+    if (model.paused_projects > 0)
+        counters << QStringLiteral("已暂停 %1").arg(model.paused_projects);
+    if (model.done_projects > 0)
+        counters << QStringLiteral("已完成 %1").arg(model.done_projects);
+    overview_counts_->setText(counters.join(QStringLiteral("  ·  ")));
+    overview_counts_->setToolTip(
+        QStringLiteral("“需要处理”包含明确 Attention、监控错误和状态过期；"
+                       "Agent 正在处理的项目单独计入“后台处理中”。"));
+
+    overview_projects_->setRowCount(static_cast<int>(model.projects.size()));
+    for (int row = 0; row < static_cast<int>(model.projects.size()); ++row) {
+        const auto& project = model.projects[static_cast<std::size_t>(row)];
+        auto* name = new QTableWidgetItem(q(project.project_name));
+        name->setData(Qt::UserRole, q(project.project_id));
+        overview_projects_->setItem(row, 0, name);
+        overview_projects_->setItem(row, 1, new QTableWidgetItem(health_text(project.health)));
+        overview_projects_->setItem(
+            row,
+            2,
+            new QTableWidgetItem(
+                project.progress.empty() ? QStringLiteral("—") : q(project.progress)));
+        overview_projects_->setItem(
+            row,
+            3,
+            new QTableWidgetItem(
+                project.headline.empty() ? QStringLiteral("—") : q(project.headline)));
+    }
+    overview_projects_->resizeColumnsToContents();
+
+    overview_attention_->setRowCount(static_cast<int>(model.attention.size()));
+    for (int row = 0; row < static_cast<int>(model.attention.size()); ++row) {
+        const auto& item = model.attention[static_cast<std::size_t>(row)];
+        overview_attention_->setItem(row, 0, new QTableWidgetItem(q(item.kind)));
+        auto* project = new QTableWidgetItem(q(item.project_name));
+        project->setData(Qt::UserRole, q(item.project_id));
+        overview_attention_->setItem(row, 1, project);
+        overview_attention_->setItem(row, 2, new QTableWidgetItem(q(item.summary)));
+    }
+    overview_attention_->resizeColumnsToContents();
+
+    overview_agents_->setRowCount(static_cast<int>(model.activity.size()));
+    for (int row = 0; row < static_cast<int>(model.activity.size()); ++row) {
+        const auto& item = model.activity[static_cast<std::size_t>(row)];
+        overview_agents_->setItem(
+            row,
+            0,
+            new QTableWidgetItem(
+                item.label.empty() ? QStringLiteral("—") : q(item.label)));
+        auto* project = new QTableWidgetItem(q(item.project_name));
+        project->setData(Qt::UserRole, q(item.project_id));
+        overview_agents_->setItem(row, 1, project);
+        overview_agents_->setItem(row, 2, new QTableWidgetItem(agent_state_text(item.state)));
+        auto* summary = new QTableWidgetItem(
+            item.summary.empty() ? QStringLiteral("—") : q(item.summary));
+        summary->setToolTip(
+            item.path.empty()
+                ? QStringLiteral("双击进入对应项目的后台处理记录。")
+                : QStringLiteral("双击进入对应项目；原始记录：%1").arg(q(item.path)));
+        overview_agents_->setItem(row, 3, summary);
+    }
+    overview_agents_->resizeColumnsToContents();
 }
 
 void QtMainWindow::render_sidebar() {
@@ -563,8 +778,12 @@ void QtMainWindow::render_takeovers() {
         const auto* item = object(&(*items)[static_cast<std::size_t>(row)]);
         if (!item) continue;
         takeovers_->setItem(row, 0, new QTableWidgetItem(q(s(item->if_contains("label")))));
-        takeovers_->setItem(row, 1, new QTableWidgetItem(q(s(item->if_contains("state")))));
-        takeovers_->setItem(row, 2, new QTableWidgetItem(q(s(item->if_contains("summary")))));
+        takeovers_->setItem(row, 1, new QTableWidgetItem(agent_state_text(s(item->if_contains("state")))));
+        auto* summary = new QTableWidgetItem(q(s(item->if_contains("summary"))));
+        summary->setData(Qt::UserRole, q(s(item->if_contains("path"))));
+        if (!s(item->if_contains("path")).empty())
+            summary->setToolTip(QStringLiteral("双击打开这次处理的原始记录。"));
+        takeovers_->setItem(row, 2, summary);
     }
     takeovers_->resizeColumnsToContents();
 }

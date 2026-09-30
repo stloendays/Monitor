@@ -1,4 +1,5 @@
 #include "monitor_hub/core.hpp"
+#include "monitor_hub/overview.hpp"
 
 #include <boost/json.hpp>
 #include <cassert>
@@ -122,6 +123,68 @@ int main() {
         if(item.if_contains("id") && item.at("id").is_string() && item.at("id").as_string() == "job:extra__monitor__local__15m")
             found_detached = true;
     assert(found_detached);
+
+    // The cross-project overview is a pure normalized-state projection.
+    std::vector<json::object> overview_projects;
+    json::object alpha;
+    alpha["id"] = "alpha";
+    alpha["name"] = "Alpha";
+    overview_projects.push_back(alpha);
+
+    json::object beta;
+    beta["id"] = "beta";
+    beta["name"] = "Beta";
+    overview_projects.push_back(beta);
+
+    json::object builtin;
+    builtin["id"] = "hub-setup";
+    builtin["name"] = "Setup";
+    builtin["builtin"] = true;
+    overview_projects.push_back(builtin);
+
+    std::map<std::string, json::object> overview_snapshots;
+    json::object alpha_snapshot;
+    alpha_snapshot["health"] = "attention";
+    alpha_snapshot["summary"] = "完成 1，运行 1";
+    alpha_snapshot["headline"] = "需要选择恢复方案";
+    alpha_snapshot["attention"] = json::array{"请选择恢复方案"};
+    json::object alpha_takeover;
+    alpha_takeover["label"] = "09-29 14:00";
+    alpha_takeover["state"] = "running";
+    alpha_takeover["summary"] = "正在检查失败原因";
+    alpha_takeover["path"] = "C:/demo/alpha/takeover.jsonl";
+    alpha_takeover["time"] = 20.0;
+    alpha_snapshot["takeovers"] = json::array{alpha_takeover};
+    overview_snapshots["alpha"] = alpha_snapshot;
+
+    json::object beta_snapshot;
+    beta_snapshot["health"] = "done";
+    beta_snapshot["summary"] = "完成 2";
+    beta_snapshot["headline"] = "全部完成";
+    beta_snapshot["attention"] = json::array{};
+    json::object beta_takeover;
+    beta_takeover["label"] = "09-29 13:00";
+    beta_takeover["state"] = "ok";
+    beta_takeover["summary"] = "恢复完成";
+    beta_takeover["path"] = "C:/demo/beta/takeover.jsonl";
+    beta_takeover["time"] = 10.0;
+    beta_snapshot["takeovers"] = json::array{beta_takeover};
+    overview_snapshots["beta"] = beta_snapshot;
+
+    const auto overview = build_overview_model(
+        overview_projects,
+        overview_snapshots,
+        8);
+    assert(overview.total_projects == 2);
+    assert(overview.attention_projects == 1);
+    assert(overview.done_projects == 1);
+    assert(overview.projects.size() == 2);
+    assert(overview.projects[0].progress == "完成 1，运行 1");
+    assert(overview.attention.size() == 1);
+    assert(overview.attention[0].kind == "需要决策");
+    assert(overview.activity.size() == 2);
+    assert(overview.activity[0].project_id == "alpha");
+    assert(overview.activity[1].project_id == "beta");
 
     fs::remove_all(root);
     std::cout << "core tests passed\n";
