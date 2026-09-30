@@ -88,6 +88,7 @@ if(MONITOR_HUB_BUILD_QT)
             Qt6::Widgets
             Qt6::Network
     )
+    add_dependencies(monitor_hub_qt monitor_hub_orchestrator)
     target_compile_definitions(monitor_hub_qt PRIVATE MONITOR_HUB_VERSION="${PROJECT_VERSION}")
     if(MSVC)
         target_compile_options(monitor_hub_qt PRIVATE /W4 /permissive- /utf-8)
