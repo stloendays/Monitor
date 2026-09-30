@@ -4,6 +4,7 @@
 #include "monitor_hub/notification_outbox.hpp"
 #include "monitor_hub/setup_request.hpp"
 #include "monitor_hub/claude_cli.hpp"
+#include "monitor_hub/windows_probe.hpp"
 
 #include <boost/json.hpp>
 #include <algorithm>
@@ -35,6 +36,27 @@ int main() {
     assert(iso_minutes("PT5H") == 300);
     assert(iso_minutes("PT1H30M") == 90);
     assert(short_time("2026-09-28T21:45:00") == "09-28 21:45");
+
+    SystemInfo raw_probe_fixture;
+    TaskInfo raw_task;
+    raw_task.name = "demo__monitor__local__15m";
+    raw_task.state = "Ready";
+    raw_task.last = "2026-09-30T10:00:00";
+    raw_task.result = 0;
+    raw_task.next = "2026-09-30T10:15:00";
+    raw_task.interval = "PT15M";
+    raw_task.action = "monitor-demo.ps1";
+    raw_probe_fixture.tasks[raw_task.name] = raw_task;
+    raw_probe_fixture.procs.push_back(
+        ProcessInfo{1234, "claude.exe", "claude --print"});
+    const auto raw_probe_json = system_info_json(raw_probe_fixture);
+    assert(raw_probe_json.at("tasks").as_object().contains(raw_task.name));
+    assert(raw_probe_json.at("procs").as_array().size() == 1);
+    assert(raw_probe_json.at("error").as_string().empty());
+    const auto& raw_task_json =
+        raw_probe_json.at("tasks").as_object().at(raw_task.name).as_object();
+    assert(raw_task_json.at("state").as_string() == "Ready");
+    assert(raw_task_json.at("interval").as_string() == "PT15M");
 
     const auto root = fs::temp_directory_path() / "monitor-hub-cpp-core-test";
     fs::remove_all(root);
