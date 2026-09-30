@@ -1,6 +1,22 @@
 # Monitor · 监控总台
 
-一个 Windows 桌面小程序，把本机上所有长时间计算任务的监控集中到一个窗口里。任务可以在本机跑（机器学习训练、数据处理），也可以在 HPC 集群的 PBS 上跑（VASP 等）。在这个窗口里你可以：
+一个 Windows 桌面小程序，把本机上所有长时间计算任务的监控集中到一个窗口里。任务可以在本机跑（机器学习训练、数据处理），也可以在 HPC 集群的 PBS 上跑（VASP 等）。
+
+## 下载 Windows 版
+
+**普通用户推荐直接下载最新 Release 的安装版：**
+[GitHub Releases · Latest](https://github.com/stloendays/Monitor/releases/latest)
+
+- **推荐：** `Monitor-Hub-<version>-win64-setup.exe` — 当前用户安装，不需要管理员权限，带开始菜单与卸载器。
+- **免安装：** `Monitor-Hub-<version>-win64-portable.zip` — 解压后运行 `MonitorHub\bin\monitor_hub_qt.exe`。
+- **自动更新专用：** `monitor-hub-windows-x64.zip` — 给 Monitor Hub updater 使用，不建议普通用户手工解压。
+- **完整性校验：** 使用 Release 中的 `SHA256SUMS.txt`。
+
+正式 Qt 安装版已经包含运行所需的 Qt 与 MSVC runtime，**普通用户不需要安装 Python**。只有使用 Claude Code 集成功能时才需要本机已有 Claude CLI。
+
+> 当前 Windows 安装包尚未使用商业代码签名证书；SmartScreen 可能提示“未知发布者”。请只从本仓库官方 Release 下载，并核验 SHA-256。
+
+在这个窗口里你可以：
 
 - **看完成情况**：每个项目一张卡片，状态一眼看清（⚠ 需要你处理 / ⟳ 后台处理中 / ● 正常 / ✔ 已完成 / ⏸ 已暂停）。进度表支持任务下钻：新格式监控提供 `row_meta` 后，双击一行可直接打开该任务目录、日志或结果文件。
 - **看后台 Claude 的处理过程**：监控发现自己处理不了的问题时，会启动一个无头 Claude（`claude -p`）按规程处理。它读了什么、运行了什么命令、得到什么结果，都能实时看到。
@@ -29,29 +45,49 @@
 
 ## 运行
 
-需要 Windows 10/11，Python 3.12（带 tkinter 和 pywin32），以及 Claude Code CLI（`claude.exe`）。
+### 正式 Windows 安装版
 
+安装后从开始菜单打开 **Monitor Hub**，或直接运行：
+
+```powershell
+"$env:LOCALAPPDATA\Programs\Monitor Hub\bin\monitor_hub_qt.exe"
 ```
-copy hub\monitor_hub_projects.example.json hub\monitor_hub_projects.json   # 然后改成你的项目
+
+常用诊断命令：
+
+```powershell
+monitor_hub_cli.exe --version
+monitor_hub_cli.exe --probe-system
+monitor_hub_cli.exe --dump
+monitor_hub_orchestrator.exe --tick
+```
+
+程序支持系统托盘、后台运行、单实例、通知和可选开机启动。关闭主窗口时，如果设置了“关闭到托盘”，程序仍会在后台运行；需要完全退出时请使用托盘菜单中的 **退出**。
+
+### 源码 / Legacy Python
+
+仓库仍保留原 Python UI 与兼容脚本用于迁移、对照和部分开发工具。需要运行旧版 Python UI 时：
+
+```bat
+copy hub\monitor_hub_projects.example.json hub\monitor_hub_projects.json
 pythonw hub\monitor_hub.py
 ```
 
-- 程序顶部的常量（`CLAUDE`、`PWSH`、`HUB_DATA`、`DETACH`）是作者机器上的路径，换机器时要改。
-- 定时任务的启动程序必须写成 `conhost.exe --headless powershell.exe …`，否则会闪窗（见 [docs/LESSONS_LEARNED.md](docs/LESSONS_LEARNED.md) A2）。
-- 新监控写出的状态文件格式：[hub/hub_status.schema.json](hub/hub_status.schema.json)。每行任务可带 `table.row_meta` 供总台打开具体任务和读取参数。
-- 可直接照抄的完整状态示例：[hub/hub_status.example.json](hub/hub_status.example.json)。新 monitor 建议写 `schema_version: 1`。
-- 写完状态文件后可运行 `python hub/validate_status.py <path-to-hub_status.json>` 做结构检查；格式错误会返回非零退出码。
-- 新监控脚本 / 定时任务的机器可读命名规范见 [docs/MONITOR_NAMING.md](docs/MONITOR_NAMING.md)。
-- 界面把运行状态与帮助文案分开：状态常驻，说明性文字使用按钮 hover tooltip；规则见 [docs/UI_GUIDELINES.md](docs/UI_GUIDELINES.md)。
+不想碰真实项目、只想生成演示数据：
 
-不想碰真实项目、只想先看效果：
-```
+```bat
 python tests\demo\make_demo.py
 set MONITOR_HUB_REGISTRY=%TEMP%\monitor-hub-demo\demo_projects.json
 set MONITOR_HUB_DATA=%TEMP%\monitor-hub-demo\hubdata
 set MONITOR_HUB_NO_DISCOVERY=1
-python hub\monitor_hub.py
 ```
+
+新监控状态格式、命名规则与 UI 约定仍分别见：
+
+- [hub/hub_status.schema.json](hub/hub_status.schema.json)
+- [hub/hub_status.example.json](hub/hub_status.example.json)
+- [docs/MONITOR_NAMING.md](docs/MONITOR_NAMING.md)
+- [docs/UI_GUIDELINES.md](docs/UI_GUIDELINES.md)
 
 ## 目录
 
