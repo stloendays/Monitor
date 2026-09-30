@@ -263,3 +263,53 @@ Matching is path-based and case-insensitive for Windows-friendly behavior. Exact
 Monitor Hub does not link projects by display name.
 
 When a match exists, the Claude card shows the associated Monitor project and enables **关联项目**, which selects that project and opens its project view. When no path match exists, the button remains disabled.
+
+
+## Native statusLine bridge
+
+Packaged Monitor Hub now prefers a native bridge implemented by `monitor_hub_cli`:
+
+```powershell
+monitor_hub_cli.exe --claude-statusline
+```
+
+The command:
+
+1. reads Claude Code statusLine JSON from stdin;
+2. applies the same allow-list policy as the Python compatibility bridge;
+3. atomically replaces the local `cli_status.json` snapshot;
+4. prints the compact visible status line to stdout;
+5. exits without making a Claude/model/network request.
+
+This removes Python as a runtime requirement for an installed Monitor Hub package.
+
+### Bridge selection in the Qt UI
+
+The **接入用量** action chooses the bridge in this order:
+
+1. `MONITOR_HUB_CLAUDE_BRIDGE` when it points to an existing custom bridge;
+2. `monitor_hub_cli.exe --claude-statusline` beside the running Qt executable;
+3. the installed/development `claude_statusline_bridge.py`;
+4. the user's established development path:
+   `D:\Research\Monitor\hub\claude_statusline_bridge.py`.
+
+If the explicit override ends in `.py`, Qt prefixes it with `python`. Other explicit overrides are treated as directly executable bridge commands.
+
+### Native snapshot safety
+
+The native bridge persists only:
+
+- version;
+- session id/name/prompt id/transcript path;
+- model id/display name;
+- workspace current/project/worktree paths;
+- Agent name/type;
+- context-window percentage;
+- session cost;
+- validated 5-hour / 7-day usage percentages and reset timestamps.
+
+It does not persist arbitrary statusLine fields, OAuth/API credentials, Agent prompts, tool input/output, or conversation text.
+
+The native write uses a temporary file and an atomic replace operation on Windows so the Qt reader does not observe a partially written JSON document.
+
+The Python bridge remains installed as a compatibility/debug fallback; both bridges write the same snapshot contract.

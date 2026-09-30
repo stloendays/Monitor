@@ -2,10 +2,19 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <vector>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace monitor_hub {
 namespace {
@@ -344,6 +353,207 @@ std::filesystem::path detect_claude_config_dir() {
     return {};
 }
 
+std::filesystem::path statusline_status_path(const RuntimePaths& paths) {
+    const auto custom = env_path("MONITOR_HUB_CLAUDE_STATUS");
+    return custom.empty()
+        ? paths.hub_data / "claude" / "cli_status.json"
+        : custom;
+}
+
+json::object sanitized_usage_window(const json::object* limits,
+                                    const char* key) {
+    json::object out;
+    if (!limits) return out;
+    const auto* source = object(limits->if_contains(key));
+    if (!source) return out;
+
+    if (const auto used = number(source->if_contains("used_percentage"));
+        used && *used >= 0.0 && *used <= 100.0) {
+        out["used_percentage"] = *used;
+    }
+    if (const auto reset = number(source->if_contains("resets_at")))
+        out["resets_at"] = *reset;
+    return out;
+}
+
+json::object sanitize_statusline_payload(const json::object& payload) {
+    json::object snapshot;
+    snapshot["schema_version"] = 1;
+    snapshot["source"] = "claude_statusline";
+    snapshot["captured_at"] = iso_now_local();
+    snapshot["version"] = str(payload.if_contains("version"));
+
+    json::object session;
+    session["id"] = str(payload.if_contains("session_id"));
+    session["name"] = str(payload.if_contains("session_name"));
+    session["prompt_id"] = str(payload.if_contains("prompt_id"));
+    session["transcript_path"] = str(payload.if_contains("transcript_path"));
+    snapshot["session"] = std::move(session);
+
+    json::object model_out;
+    if (const auto* model = object(payload.if_contains("model"))) {
+        model_out["id"] = str(model->if_contains("id"));
+        auto display = str(model->if_contains("display_name"));
+        if (display.empty()) display = str(model->if_contains("id"));
+        model_out["display_name"] = display;
+    } else {
+        model_out["id"] = "";
+        model_out["display_name"] = "";
+    }
+    snapshot["model"] = std::move(model_out);
+
+    const auto* workspace = object(payload.if_contains("workspace"));
+    json::object workspace_out;
+    auto current_dir = workspace
+        ? str(workspace->if_contains("current_dir"))
+        : std::string{};
+    if (current_dir.empty()) current_dir = str(payload.if_contains("cwd"));
+    workspace_out["current_dir"] = current_dir;
+    workspace_out["project_dir"] =
+        workspace ? str(workspace->if_contains("project_dir")) : std::string{};
+    workspace_out["git_worktree"] =
+        workspace ? str(workspace->if_contains("git_worktree")) : std::string{};
+    snapshot["workspace"] = std::move(workspace_out);
+
+    json::object agent_out;
+    if (const auto* agent = object(payload.if_contains("agent"))) {
+        agent_out["name"] = str(agent->if_contains("name"));
+        agent_out["type"] = str(agent->if_contains("type"));
+    } else {
+        agent_out["name"] = "";
+        agent_out["type"] = "";
+    }
+    snapshot["agent"] = std::move(agent_out);
+
+    json::object context_out;
+    if (const auto* context = object(payload.if_contains("context_window"))) {
+        if (const auto used = number(context->if_contains("used_percentage"));
+            used && *used >= 0.0 && *used <= 100.0) {
+            context_out["used_percentage"] = *used;
+        }
+    }
+    snapshot["context_window"] = std::move(context_out);
+
+    json::object cost_out;
+    if (const auto* cost = object(payload.if_contains("cost"))) {
+        if (const auto value = number(cost->if_contains("total_cost_usd")))
+            cost_out["total_cost_usd"] = *value;
+    }
+    snapshot["cost"] = std::move(cost_out);
+
+    const auto* limits = object(payload.if_contains("rate_limits"));
+    auto five = sanitized_usage_window(limits, "five_hour");
+    auto seven = sanitized_usage_window(limits, "seven_day");
+    json::object rate_limits;
+    if (!five.empty()) rate_limits["five_hour"] = five;
+    if (!seven.empty()) rate_limits["seven_day"] = seven;
+    snapshot["rate_limits_available"] = !rate_limits.empty();
+    snapshot["rate_limits"] = std::move(rate_limits);
+
+    return snapshot;
+}
+
+bool write_statusline_snapshot_atomic(const std::filesystem::path& target,
+                                      const json::object& snapshot,
+                                      std::string* diagnostic) {
+    std::error_code ec;
+    const auto parent = target.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            if (diagnostic) *diagnostic = "create status directory failed: " + ec.message();
+            return false;
+        }
+    }
+
+    const auto stamp = std::chrono::steady_clock::now()
+                           .time_since_epoch()
+                           .count();
+    auto temp = target;
+    temp += ".tmp." + std::to_string(stamp);
+
+    {
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            if (diagnostic) *diagnostic = "open temporary status file failed";
+            return false;
+        }
+        out << json::serialize(snapshot) << '\n';
+        out.flush();
+        if (!out) {
+            if (diagnostic) *diagnostic = "write temporary status file failed";
+            out.close();
+            std::filesystem::remove(temp, ec);
+            return false;
+        }
+    }
+
+#ifdef _WIN32
+    const auto from = temp.wstring();
+    const auto to = target.wstring();
+    if (!MoveFileExW(
+            from.c_str(),
+            to.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const auto code = GetLastError();
+        std::filesystem::remove(temp, ec);
+        if (diagnostic)
+            *diagnostic = "replace status file failed: Win32 " + std::to_string(code);
+        return false;
+    }
+#else
+    std::filesystem::rename(temp, target, ec);
+    if (ec) {
+        std::filesystem::remove(temp, ec);
+        if (diagnostic) *diagnostic = "replace status file failed: " + ec.message();
+        return false;
+    }
+#endif
+    return true;
+}
+
+std::optional<double> snapshot_usage(const json::object& snapshot,
+                                     const char* window) {
+    const auto* limits = object(snapshot.if_contains("rate_limits"));
+    const auto* value = limits ? object(limits->if_contains(window)) : nullptr;
+    return value ? number(value->if_contains("used_percentage")) : std::nullopt;
+}
+
+std::string format_percent(const std::optional<double>& value) {
+    if (!value) return "?";
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(0) << *value << "%";
+    return out.str();
+}
+
+std::string statusline_display(const json::object& snapshot) {
+    std::string model_name = "Claude";
+    if (const auto* model = object(snapshot.if_contains("model"))) {
+        const auto display = str(model->if_contains("display_name"));
+        if (!display.empty()) model_name = display;
+    }
+
+    std::vector<std::string> parts{model_name};
+    const auto five = snapshot_usage(snapshot, "five_hour");
+    const auto seven = snapshot_usage(snapshot, "seven_day");
+    if (five || seven) {
+        parts.push_back("5h " + format_percent(five));
+        parts.push_back("7d " + format_percent(seven));
+    }
+    if (const auto* context = object(snapshot.if_contains("context_window"))) {
+        if (const auto used = number(context->if_contains("used_percentage"))) {
+            parts.push_back("ctx " + format_percent(used));
+        }
+    }
+
+    std::string out;
+    for (const auto& part : parts) {
+        if (!out.empty()) out += " · ";
+        out += part;
+    }
+    return out;
+}
+
 }  // namespace
 
 ClaudeCliStatus load_claude_cli_status(
@@ -423,6 +633,46 @@ std::string match_claude_workspace_project(
         }
     }
     return best_id;
+}
+
+int run_claude_statusline_bridge(
+    std::istream& input,
+    std::ostream& output,
+    const RuntimePaths& paths,
+    std::string* diagnostic) {
+
+    try {
+        const std::string text{
+            std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>()};
+
+        boost::system::error_code parse_error;
+        auto parsed = json::parse(text, parse_error);
+        if (parse_error || !parsed.is_object()) {
+            if (diagnostic)
+                *diagnostic = parse_error
+                    ? "invalid statusLine JSON: " + parse_error.message()
+                    : "statusLine payload is not an object";
+            output << "Claude\n";
+            return 0;
+        }
+
+        auto snapshot = sanitize_statusline_payload(parsed.as_object());
+        std::string write_diagnostic;
+        write_statusline_snapshot_atomic(
+            statusline_status_path(paths),
+            snapshot,
+            &write_diagnostic);
+        if (diagnostic && !write_diagnostic.empty())
+            *diagnostic = write_diagnostic;
+
+        output << statusline_display(snapshot) << '\n';
+        return 0;
+    } catch (const std::exception& e) {
+        if (diagnostic) *diagnostic = e.what();
+        output << "Claude\n";
+        return 0;
+    }
 }
 
 }  // namespace monitor_hub

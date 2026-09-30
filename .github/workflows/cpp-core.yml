@@ -42,5 +42,26 @@ jobs:
         run: cmake -S cpp -B cpp/build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
       - name: Build
         run: cmake --build cpp/build --config Release
+      - name: Native Claude statusLine CLI smoke
+        shell: pwsh
+        run: |
+          $hubData = Join-Path $env:RUNNER_TEMP "monitor-hub-native-claude"
+          Remove-Item $hubData -Recurse -Force -ErrorAction SilentlyContinue
+          $payload = '{"version":"test","session_id":"native-ci","model":{"id":"claude-test","display_name":"Claude Test"},"workspace":{"current_dir":"C:/ci","secret":"must-not-leak"},"rate_limits":{"five_hour":{"used_percentage":25,"resets_at":1788062400}},"oauth_token":"must-not-leak"}'
+          $output = $payload | .\cpp\build\Release\monitor_hub_cli.exe --claude-statusline --hub-data $hubData
+          if ($LASTEXITCODE -ne 0) {
+            throw "native Claude statusLine CLI failed with exit code $LASTEXITCODE"
+          }
+          if (($output -join [Environment]::NewLine) -notmatch "Claude Test") {
+            throw "native Claude statusLine CLI did not emit the expected display: $output"
+          }
+          $status = Join-Path $hubData "claude\cli_status.json"
+          if (-not (Test-Path -LiteralPath $status)) {
+            throw "native Claude statusLine CLI did not write $status"
+          }
+          $text = Get-Content -LiteralPath $status -Raw
+          if ($text -match "must-not-leak" -or $text -match "oauth_token") {
+            throw "native Claude statusLine snapshot leaked a non-allow-listed field"
+          }
       - name: Test
         run: ctest --test-dir cpp/build -C Release --output-on-failure
