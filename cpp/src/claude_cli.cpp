@@ -1,6 +1,7 @@
 #include "monitor_hub/claude_cli.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
