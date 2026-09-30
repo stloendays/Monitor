@@ -20,6 +20,42 @@ QWidget#sidebar {
     border-radius: 16px;
 }
 
+QFrame#claudeCard {
+    background: #FFFFFF;
+    border: 1px solid #E4E1DA;
+    border-radius: 13px;
+}
+
+QLabel#claudeState {
+    color: #5D695F;
+    background: #EFF3EF;
+    border: 1px solid #DFE6DF;
+    border-radius: 8px;
+    padding: 3px 7px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+QLabel#usageText {
+    color: #68645D;
+    font-size: 10px;
+}
+
+QProgressBar#usageBar {
+    min-height: 8px;
+    max-height: 8px;
+    color: transparent;
+    background: #EEECE7;
+    border: none;
+    border-radius: 4px;
+    text-align: center;
+}
+
+QProgressBar#usageBar::chunk {
+    background: #7B817B;
+    border-radius: 4px;
+}
+
 QWidget#mainPane {
     background: transparent;
 }
