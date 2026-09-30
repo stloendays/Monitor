@@ -11,7 +11,6 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
-#include <QDir>
 #include <QFontDatabase>
 #include <QFrame>
 #include <QHeaderView>
@@ -68,21 +67,6 @@ const json::object* object(const json::value* v) {
 
 const json::array* array(const json::value* v) {
     return v && v->is_array() ? &v->as_array() : nullptr;
-}
-
-QString normalized_path_key(const std::string& value) {
-    if (value.empty()) return {};
-    auto path = QDir::cleanPath(q(value));
-    path.replace('\\', '/');
-    while (path.size() > 1 && path.endsWith('/')) path.chop(1);
-    return path;
-}
-
-bool paths_related(const QString& lhs, const QString& rhs) {
-    if (lhs.isEmpty() || rhs.isEmpty()) return false;
-    if (lhs.compare(rhs, Qt::CaseInsensitive) == 0) return true;
-    return lhs.startsWith(rhs + QStringLiteral("/"), Qt::CaseInsensitive) ||
-           rhs.startsWith(lhs + QStringLiteral("/"), Qt::CaseInsensitive);
 }
 
 QString health_text(const std::string& health) {
@@ -1204,40 +1188,15 @@ void QtMainWindow::render_claude_cli_status() {
 
     QStringList activity;
     const auto workspace = !status.project_dir.empty() ? status.project_dir : status.cwd;
-    claude_linked_project_id_.clear();
+    claude_linked_project_id_ =
+        match_claude_workspace_project(status, projects_);
     QString linked_project_name;
-    qsizetype linked_score = -1;
-    const auto workspace_key = normalized_path_key(workspace);
-    if (!workspace_key.isEmpty()) {
+    if (!claude_linked_project_id_.empty()) {
         for (const auto& project : projects_) {
             const auto id = s(project.if_contains("id"));
-            if (id.empty()) continue;
-
-            std::vector<std::string> candidates;
-            for (const auto* key : {"dir", "qa_cwd"}) {
-                const auto value = s(project.if_contains(key));
-                if (!value.empty()) candidates.push_back(value);
-            }
-            if (const auto* runner = object(project.if_contains("runner"))) {
-                const auto workdir = s(runner->if_contains("workdir"));
-                if (!workdir.empty()) candidates.push_back(workdir);
-            }
-            for (const auto* key : {"status_json", "status_md"}) {
-                const auto value = s(project.if_contains(key));
-                if (value.empty()) continue;
-                const auto parent = QFileInfo(q(value)).absolutePath();
-                if (!parent.isEmpty()) candidates.push_back(parent.toUtf8().toStdString());
-            }
-
-            for (const auto& candidate : candidates) {
-                const auto candidate_key = normalized_path_key(candidate);
-                if (!paths_related(workspace_key, candidate_key)) continue;
-                const auto score = candidate_key.size();
-                if (score <= linked_score) continue;
-                linked_score = score;
-                claude_linked_project_id_ = id;
-                linked_project_name = q(s(project.if_contains("name"), id));
-            }
+            if (id != claude_linked_project_id_) continue;
+            linked_project_name = q(s(project.if_contains("name"), id));
+            break;
         }
     }
 
