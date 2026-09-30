@@ -353,8 +353,6 @@ std::filesystem::path detect_claude_config_dir() {
     return {};
 }
 
-}
-
 std::filesystem::path statusline_status_path(const RuntimePaths& paths) {
     const auto custom = env_path("MONITOR_HUB_CLAUDE_STATUS");
     return custom.empty()
