@@ -1525,6 +1525,27 @@ void QtMainWindow::copy_debug_summary() {
     lines << QStringLiteral("hub_data=%1").arg(q(paths_.hub_data.string()));
     lines << QStringLiteral("job_root=%1").arg(q(paths_.job_root.string()));
 
+    const auto claude = load_claude_cli_status(system_, paths_);
+    lines << QStringLiteral("claude_cli_found=%1")
+                 .arg(claude.cli_found ? QStringLiteral("true") : QStringLiteral("false"));
+    lines << QStringLiteral("claude_cli_processes=%1").arg(claude.running_processes);
+    if (!claude.source.empty())
+        lines << QStringLiteral("claude_usage_source=%1").arg(q(claude.source));
+    if (!claude.model.empty())
+        lines << QStringLiteral("claude_model=%1").arg(q(claude.model));
+    if (claude.five_hour.used_percentage)
+        lines << QStringLiteral("claude_5h_used_percent=%1")
+                     .arg(*claude.five_hour.used_percentage, 0, 'f', 1);
+    if (claude.five_hour.resets_at)
+        lines << QStringLiteral("claude_5h_resets_at=%1")
+                     .arg(static_cast<qint64>(*claude.five_hour.resets_at));
+    if (claude.seven_day.used_percentage)
+        lines << QStringLiteral("claude_7d_used_percent=%1")
+                     .arg(*claude.seven_day.used_percentage, 0, 'f', 1);
+    if (claude.seven_day.resets_at)
+        lines << QStringLiteral("claude_7d_resets_at=%1")
+                     .arg(static_cast<qint64>(*claude.seven_day.resets_at));
+
     if (const auto* meta = selected_task_meta()) {
         const auto task_id = s(meta->if_contains("task_id"));
         if (!task_id.empty()) lines << QStringLiteral("task_id=%1").arg(q(task_id));
