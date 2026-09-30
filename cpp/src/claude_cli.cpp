@@ -16,6 +16,34 @@ std::string lower(std::string value) {
     return value;
 }
 
+std::string normalized_path_key(std::string value) {
+    if (value.empty()) return {};
+    std::replace(value.begin(), value.end(), '\\', '/');
+    std::filesystem::path path(value);
+    auto normalized = path.lexically_normal().generic_string();
+    while (normalized.size() > 1 && normalized.back() == '/')
+        normalized.pop_back();
+    return lower(normalized);
+}
+
+bool paths_related(const std::string& lhs, const std::string& rhs) {
+    if (lhs.empty() || rhs.empty()) return false;
+    if (lhs == rhs) return true;
+    return (lhs.size() > rhs.size() &&
+            lhs.compare(0, rhs.size(), rhs) == 0 &&
+            lhs[rhs.size()] == '/') ||
+           (rhs.size() > lhs.size() &&
+            rhs.compare(0, lhs.size(), lhs) == 0 &&
+            rhs[lhs.size()] == '/');
+}
+
+std::string parent_path_string(const std::string& value) {
+    if (value.empty()) return {};
+    auto normalized = value;
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+    return std::filesystem::path(normalized).parent_path().generic_string();
+}
+
 std::string str(const json::value* value) {
     if (!value) return {};
     if (value->is_string()) return std::string(value->as_string());
@@ -352,6 +380,49 @@ ClaudeCliStatus load_claude_cli_status(
 
     read_latest_stream_snapshot(paths, status);
     return status;
+}
+
+std::string match_claude_workspace_project(
+    const ClaudeCliStatus& status,
+    const std::vector<json::object>& projects) {
+
+    const auto workspace = !status.project_dir.empty()
+        ? status.project_dir
+        : status.cwd;
+    const auto workspace_key = normalized_path_key(workspace);
+    if (workspace_key.empty()) return {};
+
+    std::string best_id;
+    std::size_t best_score = 0;
+
+    for (const auto& project : projects) {
+        const auto id = str(project.if_contains("id"));
+        if (id.empty()) continue;
+
+        std::vector<std::string> candidates;
+        for (const auto* key : {"dir", "qa_cwd"}) {
+            const auto value = str(project.if_contains(key));
+            if (!value.empty()) candidates.push_back(value);
+        }
+        if (const auto* runner = object(project.if_contains("runner"))) {
+            const auto workdir = str(runner->if_contains("workdir"));
+            if (!workdir.empty()) candidates.push_back(workdir);
+        }
+        for (const auto* key : {"status_json", "status_md"}) {
+            const auto value = str(project.if_contains(key));
+            const auto parent = parent_path_string(value);
+            if (!parent.empty()) candidates.push_back(parent);
+        }
+
+        for (const auto& candidate : candidates) {
+            const auto candidate_key = normalized_path_key(candidate);
+            if (!paths_related(workspace_key, candidate_key)) continue;
+            if (candidate_key.size() <= best_score) continue;
+            best_score = candidate_key.size();
+            best_id = id;
+        }
+    }
+    return best_id;
 }
 
 }  // namespace monitor_hub
