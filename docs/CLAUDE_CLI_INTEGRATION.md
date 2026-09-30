@@ -16,7 +16,7 @@ The Qt sidebar card can show:
 - context-window usage percentage;
 - when Monitor Hub last received a usage snapshot.
 
-The card refreshes with the normal Monitor Hub refresh cycle.
+The card refreshes with the normal Monitor Hub refresh cycle. Reset times are rendered as both an absolute local time and, when close enough, a human-readable countdown such as `今天 15:00（约 2 小时 10 分钟后）`.
 
 ## Data sources
 
@@ -46,7 +46,7 @@ It does **not**:
 - call Anthropic's internal usage endpoints;
 - write credentials to Monitor Hub data.
 
-The Qt **接入用量** button copies a `/statusline` instruction pointing Claude Code at the bridge. The user still pastes and accepts that configuration inside Claude Code; Monitor Hub does not silently overwrite `settings.json`.
+The Qt **接入用量** button copies a `/statusline` instruction pointing Claude Code at the bridge. The instruction explicitly asks Claude Code to preserve/merge an existing statusLine instead of silently replacing it. The user still pastes and accepts that configuration inside Claude Code; Monitor Hub does not write `settings.json` itself.
 
 ### 2. Existing cdesktop-detach stream-json logs
 
@@ -133,6 +133,28 @@ The user's established configuration therefore continues to resolve to:
 `C:\Users\ASUS\.claude`
 
 when no override is set.
+
+### Detached Claude helper
+
+Existing default:
+
+`C:\Users\ASUS\.claude\tools\cdesktop-detach.ps1`
+
+Override:
+
+`MONITOR_HUB_DETACH`
+
+### PowerShell
+
+Existing preferred executable:
+
+`D:\Tools\PowerShell\7.6.3\pwsh.exe`
+
+Override:
+
+`MONITOR_HUB_PWSH`
+
+If that executable is unavailable and no override is set, the legacy Python hub falls back to `pwsh` from PATH.
 
 ### Detached jobs
 
