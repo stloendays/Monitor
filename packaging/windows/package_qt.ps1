@@ -22,25 +22,37 @@ function Get-Sha256([string]$Path) {
 }
 
 function Invoke-GuiSmoke([string]$Path, [string]$Argument) {
-    $stdout = [System.IO.Path]::GetTempFileName()
-    $stderr = [System.IO.Path]::GetTempFileName()
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $Path
+    $startInfo.Arguments = $Argument
+    $startInfo.WorkingDirectory = Split-Path -Parent $Path
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
     try {
-        $process = Start-Process -FilePath $Path -ArgumentList @($Argument) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+        if (-not $process.Start()) {
+            throw "GUI smoke process did not start: $Path $Argument"
+        }
         if (-not $process.WaitForExit(30000)) {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            try { $process.Kill() } catch {}
             throw "GUI smoke timed out: $Path $Argument"
         }
-        $process.Refresh()
-        if ($process.ExitCode -ne 0) {
-            $errText = [string](Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue)
-            $outText = [string](Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue)
-            $detail = ($errText + [Environment]::NewLine + $outText).Trim()
-            throw "GUI smoke failed ($($process.ExitCode)): $Path $Argument $detail"
+
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $exitCode = $process.ExitCode
+        if ($exitCode -ne 0) {
+            $detail = ($stderr + [Environment]::NewLine + $stdout).Trim()
+            throw "GUI smoke failed ($exitCode): $Path $Argument $detail"
         }
-        return Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue
+        return $stdout
     }
     finally {
-        Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+        $process.Dispose()
     }
 }
 
