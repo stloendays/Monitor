@@ -42,7 +42,7 @@ def transcript(path, steps, final, is_error=False, minutes=3.2, cost=0.41):
 
 
 def status(folder, **kw):
-    write(os.path.join(folder, "hub_status.json"), json.dumps(dict(updated=iso(4), error="", **kw), ensure_ascii=False, indent=1))
+    write(os.path.join(folder, "hub_status.json"), json.dumps(dict(schema_version=1, updated=iso(4), error="", **kw), ensure_ascii=False, indent=1))
 
 
 def main():
@@ -51,7 +51,12 @@ def main():
     status(a, headline="训练在跑，没有需要你处理的事。", summary="", done=False, attention=[], working="",
            table=dict(cols=["任务", "状态", "进度", "最近检查点", "预计剩余"],
                       rows=[["fold1", "完成", "100%", "2 小时前", "—"], ["fold2", "运行中", "62%", "3 分钟前", "1.4 小时"],
-                            ["fold3", "排队", "0%", "—", "—"]], tags=["done", "run", "queue"]),
+                            ["fold3", "排队", "0%", "—", "—"]], tags=["done", "run", "queue"],
+                      row_meta=[
+                          dict(task_id="fold1", open_path=a, log=os.path.join(a, "actions.log"), params=dict(fold=1, batch_size=64)),
+                          dict(task_id="fold2", open_path=a, log=os.path.join(a, "actions.log"), params=dict(fold=2, batch_size=32, grad_accum=2)),
+                          dict(task_id="fold3", open_path=a, params=dict(fold=3, batch_size=64)),
+                      ]),
            notes=["GPU 占用 3 / 8"], next=(NOW + dt.timedelta(minutes=11)).isoformat())
     write(os.path.join(a, "results.md"), "# 结果汇总（进行中）\n\n| fold | 验证集 R² | n |\n|---|---|---|\n| fold1 | 0.912 | 1200 |\n")
     write(os.path.join(a, "actions.log"), "%s  RESTART fold2 (#1): checkpoint resume\n%s  fold1 finished, results.md updated\n" % (iso(95), iso(30)))
@@ -73,7 +78,28 @@ def main():
                             ["slab_O_hcp", "100248", "Q", "排队中", "—", ""],
                             ["slab_OH_top", "100249", "Q", "排队中", "—", ""],
                             ["slab_H_fcc", "—", "完成", "最终单点", "-250.66703", ""]],
-                      tags=["done", "done", "run", "run", "bad", "queue", "queue", "done"]),
+                      tags=["done", "done", "run", "run", "bad", "queue", "queue", "done"],
+                      row_meta=[
+                          dict(task_id="slab_clean", host="vanda", open_path=b, result=os.path.join(b, "results", "slab_clean.md"),
+                               params=dict(ENCUT_eV=450, ISMEAR=1, SIGMA_eV=0.10, U_Ce_eV=5.0)),
+                          dict(task_id="slab_CO_top", host="vanda", open_path=b, result=os.path.join(b, "results", "slab_CO_top.md"),
+                               params=dict(ENCUT_eV=450, ISMEAR=1, SIGMA_eV=0.10, U_Ce_eV=5.0)),
+                          dict(task_id="slab_CO_bridge", job_id="100245", host="vanda", open_path=b,
+                               log=os.path.join(b, "SUBMISSION.md"), script="monitor__ceox-rh__hpc__300m.py", command="qsub run.pbs",
+                               params=dict(ENCUT_eV=450, ISMEAR=1, SIGMA_eV=0.10, U_Ce_eV=5.0, NSW=200, EDIFFG_eV_A=-0.02)),
+                          dict(task_id="slab_CO_hollow", job_id="100246", host="vanda", open_path=b,
+                               log=os.path.join(b, "SUBMISSION.md"), script="monitor__ceox-rh__hpc__300m.py", command="qsub run.pbs",
+                               params=dict(ENCUT_eV=450, ISMEAR=1, SIGMA_eV=0.10, U_Ce_eV=5.0)),
+                          dict(task_id="slab_O_fcc", host="vanda", open_path=b, log=os.path.join(b, "SUBMISSION.md"),
+                               script="monitor__ceox-rh__hpc__300m.py",
+                               params=dict(ENCUT_eV=450, NELM=200, ISMEAR=1, SIGMA_eV=0.10, U_Ce_eV=5.0)),
+                          dict(task_id="slab_O_hcp", job_id="100248", host="vanda", open_path=b, command="qsub run.pbs",
+                               params=dict(ENCUT_eV=450, U_Ce_eV=5.0)),
+                          dict(task_id="slab_OH_top", job_id="100249", host="vanda", open_path=b, command="qsub run.pbs",
+                               params=dict(ENCUT_eV=450, U_Ce_eV=5.0)),
+                          dict(task_id="slab_H_fcc", host="vanda", open_path=b, result=os.path.join(b, "results", "slab_H_fcc.md"),
+                               params=dict(ENCUT_eV=450, ISMEAR=1, SIGMA_eV=0.10, U_Ce_eV=5.0)),
+                      ]),
            notes=["scratch 配额：78.5 / 500 G（15.7%）"], next=(NOW + dt.timedelta(hours=4, minutes=40)).isoformat())
     write(os.path.join(b, "SUBMISSION.md"), "## %s 自动监控\n- slab_H_fcc 最终单点完成：E0 = -250.66703 eV\n\n## %s 自动监控\n- slab_O_fcc 第 2 次 NELM 用满，停止自动重投\n" % (iso(300), iso(4)))
     transcript(os.path.join(b, "claude_takeover_%s.jsonl" % (NOW - dt.timedelta(minutes=3)).strftime("%Y%m%d_%H%M")),

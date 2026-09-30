@@ -31,6 +31,8 @@ from tkinter import messagebox, simpledialog, ttk
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import claude_stream as cs  # noqa: E402
+import naming as nm  # noqa: E402
+import status_contract as contract  # noqa: E402
 
 # MONITOR_HUB_REGISTRY / MONITOR_HUB_DATA point the hub at other data (demo mode: tests/demo/make_demo.py);
 # MONITOR_HUB_NO_DISCOVERY=1 hides the machine's unregistered monitors.
@@ -551,21 +553,36 @@ def adapt_qoi(p, sysinfo, runner):
 
 def adapt_generic(p, sysinfo, runner):
     """hub_status.json written by monitors set up under README section 9."""
-    st = read_json(p["status_json"]) or {}
+    raw = read_json(p["status_json"])
+    st = raw if isinstance(raw, dict) else {}
+    issues = contract.validate_status(raw)
     try:
         ts = dt.datetime.fromisoformat(st["updated"]).timestamp()
     except (KeyError, ValueError, TypeError):
         ts = mtime(p["status_json"])
-    tb = st.get("table") or {}
-    cols, rows = list(tb.get("cols") or []), [[str(c) for c in r] for r in (tb.get("rows") or [])]
-    tags = list(tb.get("tags") or [])
+    tb = st.get("table") if isinstance(st.get("table"), dict) else {}
+    raw_rows = tb.get("rows") if isinstance(tb.get("rows"), list) else []
+    cols = list(tb.get("cols") or []) if isinstance(tb.get("cols"), list) else []
+    rows = [[str(c) for c in r] for r in raw_rows if isinstance(r, list)]
+    tags = list(tb.get("tags") or []) if isinstance(tb.get("tags"), list) else []
     tags = (tags + [""] * len(rows))[:len(rows)]
+    row_meta = [m if isinstance(m, dict) else {} for m in (tb.get("row_meta") or [])] if isinstance(tb.get("row_meta"), list) else []
+    row_meta = (row_meta + [{} for _ in rows])[:len(rows)]
     nxt = st.get("next")
-    snap = dict(updated=ts, headline=st.get("headline", ""), summary=st.get("summary") or count_summary(tags), notes=list(st.get("notes") or []),
-                extras=[], table=dict(cols=cols, rows=rows, tags=tags), attention=list(st.get("attention") or []),
-                working=st.get("working") or None, done=bool(st.get("done")), results=list(st.get("results") or []),
-                next=short_time(runner["next"]) if runner.get("next") else (short_time(nxt) if nxt and "T" in str(nxt) else nxt),
-                error=st.get("error") or None)
+    notes = [str(x) for x in (st.get("notes") or [])] if isinstance(st.get("notes"), list) else []
+    extras = [("状态协议提示：" + w) for w in issues["warnings"]]
+    schema_error = "状态文件格式错误：" + "；".join(issues["errors"][:4]) if issues["errors"] else None
+    monitor_error = st.get("error") if isinstance(st.get("error"), str) and st.get("error") else None
+    snap = dict(updated=ts, headline=st.get("headline", "") if isinstance(st.get("headline"), str) else "",
+                summary=(st.get("summary") if isinstance(st.get("summary"), str) else "") or count_summary(tags),
+                notes=notes, extras=extras, contract_issues=issues,
+                table=dict(cols=cols, rows=rows, tags=tags, row_meta=row_meta),
+                attention=[str(x) for x in (st.get("attention") or [])] if isinstance(st.get("attention"), list) else [],
+                working=st.get("working") if isinstance(st.get("working"), str) and st.get("working") else None,
+                done=(bool(st.get("done")) if isinstance(st.get("done"), bool) else False) and not issues["errors"],
+                results=list(st.get("results") or []) if isinstance(st.get("results"), list) else [],
+                next=short_time(runner["next"]) if runner.get("next") else (short_time(nxt) if isinstance(nxt, str) and "T" in nxt else nxt),
+                error="；".join(x for x in (monitor_error, schema_error) if x) or None)
     snap["takeovers"] = takeovers(p, sysinfo)
     return snap
 
@@ -680,13 +697,22 @@ def load_projects(sysinfo):
         return projects + [SETUP_PROJECT]
     for name, t in sorted(sysinfo["tasks"].items()):
         if name not in known_tasks:
-            extra.append(dict(id="task:" + name, name=name, area="其他监控 · 定时任务", adapter="runner_only",
-                              runner=dict(kind="schtask", name=name), action=t.get("action", ""), unregistered=True))
+            meta = nm.parse_monitor_identity(name, t.get("action", ""))
+            display = meta.get("display_name") or name
+            area = "其他监控 · 定时任务" + ((" · " + meta["scope"]) if meta.get("scope") else "")
+            extra.append(dict(id="task:" + name, name=display, area=area, adapter="runner_only",
+                              runner=dict(kind="schtask", name=name, interval_min=meta.get("interval_min")), action=t.get("action", ""),
+                              naming=meta, unregistered=True))
     for d in glob.glob(os.path.join(JOBROOT, "*monitor*")):
         name = os.path.basename(d)
         if name not in known_jobs:
-            extra.append(dict(id="job:" + name, name=name, area="其他监控 · 后台作业", adapter="runner_only",
-                              runner=dict(kind="detach", name=name), action=read_text(os.path.join(d, "run.ps1"))[-300:], unregistered=True))
+            action = read_text(os.path.join(d, "run.ps1"))[-1200:]
+            meta = nm.parse_monitor_identity(name, action)
+            display = meta.get("display_name") or name
+            area = "其他监控 · 后台作业" + ((" · " + meta["scope"]) if meta.get("scope") else "")
+            extra.append(dict(id="job:" + name, name=display, area=area, adapter="runner_only",
+                              runner=dict(kind="detach", name=name, interval_min=meta.get("interval_min")),
+                              action=action, naming=meta, unregistered=True))
     return projects + [SETUP_PROJECT] + extra
 
 
@@ -842,6 +868,8 @@ class Hub(tk.Tk):
         self.wake = threading.Event()
         self.pg_cols = None
         self.res_path = None
+        self._tip_win = None
+        self._tip_after = None
         os.makedirs(os.path.join(HUB_DATA, "qa"), exist_ok=True)
         os.makedirs(REQ_DIR, exist_ok=True)
         self._style()
@@ -887,6 +915,63 @@ class Hub(tk.Tk):
             t.tag_configure(tag, **kw)
         return f, t
 
+    def _tooltip(self, widget, text):
+        """Attach a hover-only helper. Functional state stays in the main UI; explanatory text lives here."""
+        widget._hub_tip = text
+        widget.bind("<Enter>", lambda e, w=widget: self._tip_schedule(w), add="+")
+        widget.bind("<Leave>", lambda e: self._tip_hide(), add="+")
+        widget.bind("<ButtonPress>", lambda e: self._tip_hide(), add="+")
+        return widget
+
+    @staticmethod
+    def _set_tooltip(widget, text):
+        widget._hub_tip = text
+
+    def _tip_schedule(self, widget):
+        self._tip_hide()
+        self._tip_after = self.after(350, lambda: self._tip_show(widget))
+
+    def _tip_show(self, widget):
+        self._tip_after = None
+        text = getattr(widget, "_hub_tip", "")
+        if not text or not widget.winfo_exists():
+            return
+        win = tk.Toplevel(self)
+        win.wm_overrideredirect(True)
+        try:
+            win.wm_attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        label = tk.Label(win, text=text, font=(UI, 10), fg=INK, bg="#fffbe6", relief="solid", borderwidth=1,
+                         justify="left", anchor="w", wraplength=460, padx=9, pady=7)
+        label.pack()
+        win.update_idletasks()
+        x = widget.winfo_rootx() + 8
+        y = widget.winfo_rooty() + widget.winfo_height() + 7
+        x = min(x, max(0, win.winfo_screenwidth() - win.winfo_reqwidth() - 8))
+        y = min(y, max(0, win.winfo_screenheight() - win.winfo_reqheight() - 8))
+        win.wm_geometry("+%d+%d" % (x, y))
+        self._tip_win = win
+
+    def _tip_hide(self):
+        if self._tip_after is not None:
+            try:
+                self.after_cancel(self._tip_after)
+            except tk.TclError:
+                pass
+            self._tip_after = None
+        if self._tip_win is not None:
+            try:
+                self._tip_win.destroy()
+            except tk.TclError:
+                pass
+            self._tip_win = None
+
+    def _info_button(self, parent, text):
+        b = ttk.Button(parent, text="ⓘ 说明", takefocus=False)
+        self._tooltip(b, text)
+        return b
+
     def _build(self):
         side = tk.Frame(self, bg="white", width=380, highlightthickness=1, highlightbackground=LINE)
         side.pack(side="left", fill="y")
@@ -897,12 +982,20 @@ class Hub(tk.Tk):
         self.side_list.pack(fill="both", expand=True, padx=8)
         bot = tk.Frame(side, bg="white")
         bot.pack(fill="x", padx=12, pady=(8, 2))
-        ttk.Button(bot, text="＋ 新建监控任务", style="Accent.TButton", command=self._new_request).pack(side="left")
-        ttk.Button(bot, text="使用说明", command=lambda: os.path.exists(README) and os.startfile(README)).pack(side="left", padx=6)
+        b = ttk.Button(bot, text="＋ 新建监控任务", style="Accent.TButton", command=self._new_request)
+        b.pack(side="left")
+        self._tooltip(b, "填写并提交新的监控请求；后台会按你的权限范围设置监控并登记到总台。")
+        b = ttk.Button(bot, text="使用说明", command=lambda: os.path.exists(README) and os.startfile(README))
+        b.pack(side="left", padx=6)
+        self._tooltip(b, "打开监控总台的详细使用说明和状态文件规范。")
         bot2 = tk.Frame(side, bg="white")
         bot2.pack(fill="x", padx=12, pady=(4, 4))
-        ttk.Button(bot2, text="立即刷新", command=self.wake.set).pack(side="left")
-        ttk.Button(bot2, text="编辑项目表", command=lambda: os.startfile(REGISTRY)).pack(side="left", padx=6)
+        b = ttk.Button(bot2, text="立即刷新", command=self.wake.set)
+        b.pack(side="left")
+        self._tooltip(b, "立即唤醒总台刷新监控状态；不会启动、停止或修改计算任务。")
+        b = ttk.Button(bot2, text="编辑项目表", command=lambda: os.startfile(REGISTRY))
+        b.pack(side="left", padx=6)
+        self._tooltip(b, "打开项目注册表 monitor_hub_projects.json；这里决定哪些正式项目出现在总台。")
         self.side_time = tk.Label(side, text="", font=(UI, 10), fg=INK, bg="white")
         self.side_time.pack(anchor="w", padx=16, pady=(2, 8))
 
@@ -914,8 +1007,11 @@ class Hub(tk.Tk):
 
     def _build_overview(self):
         f = self.ov = tk.Frame(self.main, bg="white")
-        tk.Label(f, text="总览", font=(UI, 18, "bold"), fg=INK, bg="white").pack(anchor="w", padx=20, pady=(16, 2))
-        tk.Label(f, text="每行是一个项目的监控。双击一行查看详情、后台处理记录、最终结果和提问。", font=(UI, 11), fg=INK, bg="white").pack(anchor="w", padx=20)
+        top = tk.Frame(f, bg="white")
+        top.pack(fill="x", padx=20, pady=(16, 2))
+        tk.Label(top, text="总览", font=(UI, 18, "bold"), fg=INK, bg="white").pack(side="left")
+        info = self._info_button(top, "每行代表一个项目监控。双击项目或按 Enter 可进入详情、后台处理记录、最终结果和提问。\n\n状态颜色只用于快速识别；具体结论以“当前情况”和项目详情为准。")
+        info.pack(side="right")
         box = tk.Frame(f, bg="white")
         box.pack(fill="x", padx=20, pady=10)
         cols = [("name", "项目", 290), ("health", "状态", 140), ("summary", "当前情况", 380), ("last", "上次检查", 120), ("next", "下次检查", 150)]
@@ -928,9 +1024,11 @@ class Hub(tk.Tk):
         self.ov_tree.pack(fill="x")
         self.ov_tree.bind("<Double-1>", lambda e: self.ov_tree.focus() and self._select(self.ov_tree.focus()))
         self.ov_tree.bind("<Return>", lambda e: self.ov_tree.focus() and self._select(self.ov_tree.focus()))
-        tk.Label(f, text="最近的后台处理（所有项目）", font=(UI, 13, "bold"), fg=INK, bg="white").pack(anchor="w", padx=20, pady=(10, 2))
-        tk.Label(f, text="监控请后台 Claude 处理问题、或按你的请求设置新监控的记录，最新的在上面。双击一行查看它每一步做了什么。",
-                 font=(UI, 11), fg=INK, bg="white").pack(anchor="w", padx=20)
+        recent_head = tk.Frame(f, bg="white")
+        recent_head.pack(fill="x", padx=20, pady=(10, 2))
+        tk.Label(recent_head, text="最近的后台处理（所有项目）", font=(UI, 13, "bold"), fg=INK, bg="white").pack(side="left")
+        info = self._info_button(recent_head, "这里记录监控自动请后台 Claude 处理问题，或按你的请求设置新监控的过程。最新记录在最上面；双击一行可查看完整处理过程。")
+        info.pack(side="right")
         box2 = tk.Frame(f, bg="white")
         box2.pack(fill="both", expand=True, padx=20, pady=(6, 10))
         cols = [("time", "时间", 130), ("proj", "项目", 260), ("state", "结果", 100), ("summary", "摘要", 600)]
@@ -942,14 +1040,6 @@ class Hub(tk.Tk):
             self.rc_tree.tag_configure(tag, foreground=col)
         self.rc_tree.pack(fill="both", expand=True)
         self.rc_tree.bind("<Double-1>", lambda e: self._open_recent())
-        leg = ttk.LabelFrame(f, text="状态说明", padding=10)
-        leg.pack(fill="x", padx=20, pady=(0, 16))
-        for h in ["attention", "working", "ok", "done", "paused", "stale", "error"]:
-            lab, col, mean = HEALTH[h]
-            row = tk.Frame(leg, bg="white")
-            row.pack(fill="x", pady=1)
-            tk.Label(row, text=lab, font=(UI, 11, "bold"), fg=col, bg="white", width=14, anchor="w").pack(side="left")
-            tk.Label(row, text=mean, font=(UI, 11), fg=INK, bg="white", anchor="w").pack(side="left")
 
     def _build_project(self):
         f = self.pv = tk.Frame(self.main, bg="white")
@@ -960,9 +1050,17 @@ class Hub(tk.Tk):
         self.pv_area = tk.Label(head, text="", font=(UI, 11), fg=INK, bg="white")
         self.pv_area.pack(side="left", padx=12, pady=(6, 0))
         self.btns = {}
+        action_tips = {
+            "folder": "打开这个项目在本机登记的工作目录。",
+            "interval": "修改监控检查周期。只改变监控频率，不改变科学计算参数。",
+            "resume": "恢复已暂停的监控；计算任务本身不会因此重新开始。",
+            "pause": "暂停定时监控和自动处理；已经在跑的计算不受影响。",
+            "run": "立即执行一轮和定时检查相同的监控逻辑；若规程允许，可能触发自动恢复或重投。"
+        }
         for key, label in (("folder", "打开文件夹"), ("interval", "检查间隔…"), ("resume", "恢复监控"), ("pause", "暂停监控"), ("run", "立即检查一次")):
             b = ttk.Button(head, text=label, command=lambda k=key: self._action(k))
             b.pack(side="right", padx=4)
+            self._tooltip(b, action_tips[key])
             self.btns[key] = b
         stat = tk.Frame(f, bg="white")
         stat.pack(fill="x", padx=20, pady=(6, 0))
@@ -980,29 +1078,74 @@ class Hub(tk.Tk):
         # progress
         t1 = tk.Frame(self.nb, bg="white")
         self.nb.add(t1, text="进度")
-        box = tk.Frame(t1, bg="white")
-        box.pack(fill="both", expand=True, pady=(10, 0))
+        pgh = tk.Frame(t1, bg="white")
+        pgh.pack(fill="x", pady=(8, 0))
+        info = self._info_button(pgh, "颜色：绿色 = 已完成，蓝色 = 运行中，棕色 = 排队中，红色 = 异常，黑色 = 其他。\n\n选中任务行会在下方显示 task_id、job_id、主机、脚本、命令和参数；双击或按 Enter 可打开任务目录、日志或结果文件。")
+        info.pack(side="right")
+        pgpan = ttk.PanedWindow(t1, orient="horizontal")
+        pgpan.pack(fill="both", expand=True, pady=(4, 0))
+        pgleft = tk.Frame(pgpan, bg="white")
+        box = tk.Frame(pgleft, bg="white")
+        box.pack(fill="both", expand=True)
         self.pg_tree = ttk.Treeview(box, show="headings")
         vs = ttk.Scrollbar(box, orient="vertical", command=self.pg_tree.yview)
         hs = ttk.Scrollbar(box, orient="horizontal", command=self.pg_tree.xview)
         self.pg_tree.configure(yscrollcommand=vs.set, xscrollcommand=hs.set)
         self.pg_tree.grid(row=0, column=0, sticky="nsew")
+        self.pg_tree.bind("<Double-1>", self._open_progress_task)
+        self.pg_tree.bind("<Return>", self._open_progress_task)
+        self.pg_tree.bind("<<TreeviewSelect>>", lambda e: self._show_progress_task_meta())
         vs.grid(row=0, column=1, sticky="ns")
         hs.grid(row=1, column=0, sticky="ew")
         box.rowconfigure(0, weight=1)
         box.columnconfigure(0, weight=1)
         for tag, col in (("done", GREEN), ("bad", RED), ("run", BLUE), ("queue", BROWN), ("other", INK)):
             self.pg_tree.tag_configure(tag, foreground=col)
-        tk.Label(t1, text="颜色：绿色 = 已完成，蓝色 = 运行中，棕色 = 排队中，红色 = 异常，黑色 = 其他", font=(UI, 10), fg=INK, bg="white",
-                 anchor="w").pack(fill="x", pady=(4, 0))
-        nf, self.pg_notes = self._textbox(t1, height=5)
+        nf, self.pg_notes = self._textbox(pgleft, height=5)
         nf.pack(fill="x", pady=(6, 0))
+
+        pgright = ttk.LabelFrame(pgpan, text="任务详情", padding=10)
+        self.pg_task_title = tk.Label(pgright, text="未选择任务", font=(UI, 13, "bold"), fg=INK, bg="white",
+                                      anchor="w", justify="left", wraplength=360)
+        self.pg_task_title.pack(fill="x")
+        self.pg_task_sub = tk.Label(pgright, text="", font=(UI, 10), fg=INK, bg="white",
+                                    anchor="w", justify="left", wraplength=360)
+        self.pg_task_sub.pack(fill="x", pady=(2, 0))
+        self.pg_task_path = tk.Label(pgright, text="", font=(MONO, 9), fg=INK, bg="white",
+                                     anchor="w", justify="left", wraplength=360)
+        self.pg_task_path.pack(fill="x", pady=(4, 6))
+
+        pgb = tk.Frame(pgright, bg="white")
+        pgb.pack(fill="x", pady=(0, 8))
+        self.pg_meta_btns = {}
+        for key, label, tip in (
+            ("open", "打开任务", "打开任务登记的 open_path / path / workdir；没有目录时会尝试日志或结果文件。"),
+            ("log", "日志", "打开当前任务登记的主要日志文件。"),
+            ("result", "结果", "打开当前任务登记的结果文件。"),
+            ("copy", "复制命令", "把当前任务登记的启动/提交命令复制到剪贴板，不会执行命令。"),
+        ):
+            cmd = (lambda k=key: self._progress_meta_action(k))
+            b = ttk.Button(pgb, text=label, command=cmd)
+            b.pack(side="left", padx=(0, 5))
+            self._tooltip(b, tip)
+            self.pg_meta_btns[key] = b
+
+        tk.Label(pgright, text="参数", font=(UI, 11, "bold"), fg=INK, bg="white").pack(anchor="w", pady=(2, 3))
+        self.pg_param_tree = ttk.Treeview(pgright, columns=("key", "value"), show="headings", height=9)
+        self.pg_param_tree.heading("key", text="参数")
+        self.pg_param_tree.heading("value", text="值")
+        self.pg_param_tree.column("key", width=145, minwidth=100, anchor="w", stretch=False)
+        self.pg_param_tree.column("value", width=210, minwidth=130, anchor="w", stretch=True)
+        self.pg_param_tree.pack(fill="both", expand=True)
+        pgpan.add(pgleft, weight=3)
+        pgpan.add(pgright, weight=1)
         # takeovers
         t2 = tk.Frame(self.nb, bg="white")
         self.nb.add(t2, text="后台处理记录")
-        self.tk_hint = tk.Label(t2, text="监控发现自己处理不了的问题时，会自动请一个后台 Claude 按规程处理。左边选一次处理，右边显示它每一步做了什么（正在处理的会实时更新）。",
-                                font=(UI, 11), fg=INK, bg="white", anchor="w", justify="left", wraplength=1150)
-        self.tk_hint.pack(fill="x", pady=(8, 6))
+        tkh = tk.Frame(t2, bg="white")
+        tkh.pack(fill="x", pady=(8, 4))
+        self.tk_info = self._info_button(tkh, "监控发现自己处理不了的问题时，会自动请一个后台 Claude 按规程处理。左边选一次处理，右边显示它每一步做了什么；正在处理的记录会实时更新。")
+        self.tk_info.pack(side="right")
         pan = ttk.PanedWindow(t2, orient="horizontal")
         pan.pack(fill="both", expand=True)
         lf = tk.Frame(pan, bg="white")
@@ -1019,7 +1162,9 @@ class Hub(tk.Tk):
         bar.pack(fill="x", pady=(0, 4))
         self.tk_state = tk.Label(bar, text="", font=(UI, 11, "bold"), fg=INK, bg="white")
         self.tk_state.pack(side="left")
-        ttk.Button(bar, text="用文本编辑器打开", command=lambda: self.tr_path and os.startfile(self.tr_path)).pack(side="right")
+        b = ttk.Button(bar, text="用文本编辑器打开", command=lambda: self.tr_path and os.startfile(self.tr_path))
+        b.pack(side="right")
+        self._tooltip(b, "在系统默认文本编辑器中打开当前这次后台处理的原始记录。")
         trf, self.tr_text = self._textbox(rf, height=20, mono=True)
         trf.pack(fill="both", expand=True)
         pan.add(lf, weight=1)
@@ -1027,8 +1172,10 @@ class Hub(tk.Tk):
         # results
         self.t_res = tk.Frame(self.nb, bg="white")
         self.nb.add(self.t_res, text="最终结果")
-        tk.Label(self.t_res, text="这个项目的最终交付文件（结果表、RESULTS.md 等）。计算全部完成后，监控会把完整结果写在这里列出的文件里。",
-                 font=(UI, 11), fg=INK, bg="white", anchor="w", justify="left", wraplength=1150).pack(fill="x", pady=(8, 6))
+        resh = tk.Frame(self.t_res, bg="white")
+        resh.pack(fill="x", pady=(8, 4))
+        info = self._info_button(resh, "这里列出项目登记的最终交付文件，例如结果表、RESULTS.md 等。文件尚未生成时会显示“尚未生成”；完成后可在右侧预览并打开原文件。")
+        info.pack(side="right")
         pan2 = ttk.PanedWindow(self.t_res, orient="horizontal")
         pan2.pack(fill="both", expand=True)
         lf2 = tk.Frame(pan2, bg="white")
@@ -1044,7 +1191,9 @@ class Hub(tk.Tk):
         bar.pack(fill="x", pady=(0, 4))
         self.res_label = tk.Label(bar, text="", font=(UI, 11, "bold"), fg=INK, bg="white")
         self.res_label.pack(side="left")
-        ttk.Button(bar, text="用文本编辑器打开", command=lambda: self.res_path and os.path.exists(self.res_path) and os.startfile(self.res_path)).pack(side="right")
+        b = ttk.Button(bar, text="用文本编辑器打开", command=lambda: self.res_path and os.path.exists(self.res_path) and os.startfile(self.res_path))
+        b.pack(side="right")
+        self._tooltip(b, "在系统默认文本编辑器中打开当前选中的最终结果文件。")
         rtf, self.res_text = self._textbox(rf2, height=20)
         rtf.pack(fill="both", expand=True)
         pan2.add(lf2, weight=1)
@@ -1052,16 +1201,17 @@ class Hub(tk.Tk):
         # questions
         t3 = tk.Frame(self.nb, bg="white")
         self.nb.add(t3, text="提问")
-        tk.Label(t3, text="向 Claude 提问这个项目的情况。它只能查看文件，不能运行命令、不会改动任何作业；总台会把此刻的状态和实时查询结果一起发给它。"
-                          "选“接着问某次处理”时，它带着那次后台处理的完整上下文回答（上下文长，折合费用约为新对话的 10 倍以上）。",
-                 font=(UI, 11), fg=INK, bg="white", anchor="w", justify="left", wraplength=1150).pack(fill="x", pady=(8, 6))
         bar = tk.Frame(t3, bg="white")
         bar.pack(fill="x", pady=(0, 6))
         tk.Label(bar, text="问谁：", font=(UI, 11), fg=INK, bg="white").pack(side="left")
         self.qa_box = ttk.Combobox(bar, state="readonly", width=46, font=(UI, 11))
         self.qa_box.pack(side="left")
         self.qa_box.bind("<<ComboboxSelected>>", lambda e: self._qa_new_thread())
-        ttk.Button(bar, text="新对话", command=self._qa_new_thread).pack(side="right")
+        self.qa_info = self._info_button(bar, "这里可以向 Claude 查询当前项目。提问会话只能读取文件，不能运行命令，也不会修改作业。总台会附带当前监控状态和实时查询结果。\n\n选择“接着问某次处理”会携带那次后台处理的上下文，通常比新对话占用更多上下文。\n\n示例：现在进度怎样？上一次后台处理做了什么？哪个作业最慢，为什么？")
+        self.qa_info.pack(side="right", padx=(6, 0))
+        b = ttk.Button(bar, text="新对话", command=self._qa_new_thread)
+        b.pack(side="right")
+        self._tooltip(b, "清空这个项目当前提问会话的 session，从新的上下文开始问。")
         qf, self.qa_text = self._textbox(t3, height=14)
         qf.pack(fill="both", expand=True)
         inp = tk.Frame(t3, bg="white")
@@ -1071,7 +1221,8 @@ class Hub(tk.Tk):
         self.qa_in.bind("<Return>", self._qa_enter)
         self.qa_btn = ttk.Button(inp, text="发送", command=self._qa_ask)
         self.qa_btn.pack(side="left", padx=(6, 0), fill="y")
-        self.qa_state = tk.Label(t3, text="Enter 发送，Shift+Enter 换行。", font=(UI, 10), fg=INK, bg="white", anchor="w")
+        self._tooltip(self.qa_btn, "发送当前问题。Enter 发送，Shift+Enter 换行。")
+        self.qa_state = tk.Label(t3, text="", font=(UI, 10), fg=INK, bg="white", anchor="w")
         self.qa_state.pack(fill="x", pady=(4, 0))
         # log
         t4 = tk.Frame(self.nb, bg="white")
@@ -1080,8 +1231,12 @@ class Hub(tk.Tk):
         bar.pack(fill="x", pady=(8, 4))
         self.log_label = tk.Label(bar, text="", font=(UI, 11), fg=INK, bg="white", anchor="w")
         self.log_label.pack(side="left")
-        ttk.Button(bar, text="打开完整日志", command=lambda: self._open_key("log")).pack(side="right")
-        ttk.Button(bar, text="打开最新接管报告", command=lambda: self._open_key("report")).pack(side="right", padx=6)
+        b = ttk.Button(bar, text="打开完整日志", command=lambda: self._open_key("log"))
+        b.pack(side="right")
+        self._tooltip(b, "打开当前项目登记的完整监控日志。")
+        b = ttk.Button(bar, text="打开最新接管报告", command=lambda: self._open_key("report"))
+        b.pack(side="right", padx=6)
+        self._tooltip(b, "打开当前项目最近一次后台接管生成的报告文件。")
         lgf, self.log_text = self._textbox(t4, height=20, mono=True)
         lgf.pack(fill="both", expand=True)
         # live query
@@ -1091,7 +1246,7 @@ class Hub(tk.Tk):
         bar.pack(fill="x", pady=(8, 4))
         self.lq_btn = ttk.Button(bar, text="查询", command=self._live_query)
         self.lq_btn.pack(side="left")
-        tk.Label(bar, text="直接向服务器查询当前状态（只读），不经过监控。", font=(UI, 11), fg=INK, bg="white").pack(side="left", padx=10)
+        self._tooltip(self.lq_btn, "直接向服务器查询当前状态，只读，不经过监控逻辑，也不会修改或重启作业。")
         lqf, self.lq_text = self._textbox(self.t5, height=20, mono=True)
         lqf.pack(fill="both", expand=True)
 
@@ -1317,20 +1472,41 @@ class Hub(tk.Tk):
                 longest = max([len(c)] + [len(r_[cols.index(c)]) for r_ in tb["rows"]]) if tb["rows"] else len(c)
                 self.pg_tree.heading(i, text=c)
                 self.pg_tree.column(i, width=min(420, max(80, 14 * longest)), anchor="w", stretch=True)
+        same_project = getattr(self, "_pg_project_id", None) == p["id"]
+        old_sel = self.pg_tree.selection()
+        old_iid = old_sel[0] if old_sel else self.pg_tree.focus()
+        old_task_id = self._progress_meta(old_iid).get("task_id") if same_project and old_iid else None
         self.pg_tree.delete(*self.pg_tree.get_children())
-        for row, tag in zip(tb["rows"], tb["tags"]):
-            self.pg_tree.insert("", "end", values=row, tags=(tag,) if tag else ())
+        self._pg_project_id = p["id"]
+        self._pg_meta = list(tb.get("row_meta") or [])
+        if len(self._pg_meta) < len(tb["rows"]):
+            self._pg_meta += [{} for _ in range(len(tb["rows"]) - len(self._pg_meta))]
+        for i, (row, tag) in enumerate(zip(tb["rows"], tb["tags"])):
+            self.pg_tree.insert("", "end", iid=str(i), values=row, tags=(tag,) if tag else ())
+        target_iid = None
+        if old_task_id:
+            target_iid = next((str(i) for i, meta in enumerate(self._pg_meta) if meta.get("task_id") == old_task_id), None)
+        if target_iid is None and same_project and old_iid and self.pg_tree.exists(old_iid):
+            target_iid = old_iid
+        if target_iid is None and tb["rows"]:
+            target_iid = "0"
+        if target_iid is not None:
+            self.pg_tree.selection_set(target_iid)
+            self.pg_tree.focus(target_iid)
+            self.pg_tree.see(target_iid)
         self.pg_tree.configure(height=max(3, min(18, len(tb["rows"]))))
         notes = [(e, None) for e in s.get("extras", []) if e]
         if s.get("notes"):
             notes += [("备注：", "bold")] + [("  • " + n, None) for n in s["notes"]]
         if not tb["rows"]:
             notes = [(s.get("headline", ""), None)] + notes
-        self._set(self.pg_notes, notes or [("（没有备注）", None)])
+        self._pg_base_notes = notes or [("（没有备注）", None)]
+        self._set(self.pg_notes, self._pg_base_notes)
+        self._show_progress_task_meta()
         # takeovers
-        self.tk_hint.configure(text=("每个新任务请求由一个后台 Claude 办理：写监控脚本、登记到总台、启动监控并做第一轮检查。左边选一个请求，右边显示它每一步做了什么。"
-                                     if p.get("builtin") else
-                                     "监控发现自己处理不了的问题时，会自动请一个后台 Claude 按规程处理。左边选一次处理，右边显示它每一步做了什么（正在处理的会实时更新）。"))
+        self._set_tooltip(self.tk_info, ("每个新任务请求由一个后台 Claude 办理：写监控脚本、登记到总台、启动监控并做第一轮检查。左边选一个请求，右边显示它每一步做了什么。"
+                                         if p.get("builtin") else
+                                         "监控发现自己处理不了的问题时，会自动请一个后台 Claude 按规程处理。左边选一次处理，右边显示它每一步做了什么；正在处理的会实时更新。"))
         tks = s.get("takeovers", [])
         keys = [t["key"] for t in tks]
         sel = self.tk_tree.selection()
@@ -1379,6 +1555,96 @@ class Hub(tk.Tk):
         self.nb.tab(self.t5, state="normal" if lq else "hidden")
         if lq:
             self.lq_btn.configure(text=lq.get("label", "查询"))
+
+    def _progress_meta(self, iid=None):
+        if iid is None:
+            sel = self.pg_tree.selection()
+            iid = sel[0] if sel else self.pg_tree.focus()
+        try:
+            meta = self._pg_meta[int(iid)] if iid and getattr(self, "_pg_meta", None) else {}
+        except (ValueError, IndexError):
+            meta = {}
+        return meta if isinstance(meta, dict) else {}
+
+    def _show_progress_task_meta(self):
+        sel = self.pg_tree.selection()
+        iid = sel[0] if sel else self.pg_tree.focus()
+        meta = self._progress_meta(iid)
+        values = list(self.pg_tree.item(iid, "values")) if iid and self.pg_tree.exists(iid) else []
+        row = dict(zip(self.pg_cols or [], values))
+        task = meta.get("task_id") or (str(values[0]) if values else "未选择任务")
+        status = next((str(v) for k, v in row.items() if k.lower() in ("status", "state") or "状态" in k), "")
+        sub = []
+        if status:
+            sub.append(status)
+        if meta.get("job_id") not in (None, ""):
+            sub.append("Job %s" % meta["job_id"])
+        if meta.get("host"):
+            sub.append(str(meta["host"]))
+        self.pg_task_title.configure(text=task)
+        self.pg_task_sub.configure(text="  ·  ".join(sub))
+
+        path = next((meta.get(k) for k in ("open_path", "path", "workdir") if meta.get(k)), "")
+        detail = []
+        if path:
+            detail.append("路径：%s" % path)
+        if meta.get("script"):
+            detail.append("脚本：%s" % meta["script"])
+        if meta.get("command"):
+            detail.append("命令：%s" % meta["command"])
+        if meta.get("log"):
+            detail.append("日志：%s" % meta["log"])
+        if meta.get("result"):
+            detail.append("结果：%s" % meta["result"])
+        self.pg_task_path.configure(text="\n".join(detail))
+
+        self.pg_param_tree.delete(*self.pg_param_tree.get_children())
+        params = meta.get("params") if isinstance(meta.get("params"), dict) else {}
+        for i, key in enumerate(sorted(params, key=lambda x: str(x).lower())):
+            value = params[key]
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            self.pg_param_tree.insert("", "end", iid=str(i), values=(key, value))
+
+        default_target = next((meta.get(k) for k in ("open_path", "path", "workdir", "log", "result")
+                               if meta.get(k) and os.path.exists(meta[k])), None)
+        self.pg_meta_btns["open"].configure(state="normal" if default_target else "disabled")
+        self.pg_meta_btns["log"].configure(state="normal" if meta.get("log") and os.path.exists(meta["log"]) else "disabled")
+        self.pg_meta_btns["result"].configure(state="normal" if meta.get("result") and os.path.exists(meta["result"]) else "disabled")
+        self.pg_meta_btns["copy"].configure(state="normal" if meta.get("command") else "disabled")
+
+    def _progress_meta_action(self, what):
+        meta = self._progress_meta()
+        if what == "copy":
+            command = meta.get("command")
+            if command:
+                self.clipboard_clear()
+                self.clipboard_append(str(command))
+            return
+        if what == "log":
+            target = meta.get("log")
+        elif what == "result":
+            target = meta.get("result")
+        else:
+            target = next((meta.get(k) for k in ("open_path", "path", "workdir", "log", "result")
+                           if meta.get(k) and os.path.exists(meta[k])), None)
+        if target and os.path.exists(target):
+            os.startfile(target)
+            return
+        messagebox.showinfo("任务文件", "当前任务没有可在本机打开的对应文件或目录。", parent=self)
+
+    def _open_progress_task(self, event=None):
+        iid = self.pg_tree.identify_row(event.y) if event is not None and hasattr(event, "y") else None
+        if iid:
+            self.pg_tree.selection_set(iid)
+            self.pg_tree.focus(iid)
+        else:
+            sel = self.pg_tree.selection()
+            iid = sel[0] if sel else self.pg_tree.focus()
+        if not iid:
+            return
+        self._show_progress_task_meta()
+        self._progress_meta_action("open")
 
     def _open_key(self, key):
         p, _ = self._project()
@@ -1507,11 +1773,13 @@ class Hub(tk.Tk):
         w.title("新建监控任务")
         w.geometry("1000x820")
         w.configure(bg="white")
-        tk.Label(w, text="新建监控任务", font=(UI, 16, "bold"), fg=INK, bg="white").pack(anchor="w", padx=16, pady=(12, 2))
-        tk.Label(w, text="按下面的格式在冒号后面填写（写不全也可以，Claude 会先读项目目录里的文件再办理）。填好后有两种提交方式：\n"
-                         "① 复制下来，粘贴给和 Claude 的对话；② 直接交给后台 Claude 办理，过程显示在“新任务办理”里。\n"
-                         "办理内容：写监控脚本、登记到总台、按你给的间隔启动监控；之后出问题自动处理，全部完成后把最终结果写好并显示在“最终结果”页。",
-                 font=(UI, 11), fg=INK, bg="white", justify="left", anchor="w").pack(fill="x", padx=16)
+        titlebar = tk.Frame(w, bg="white")
+        titlebar.pack(fill="x", padx=16, pady=(12, 2))
+        tk.Label(titlebar, text="新建监控任务", font=(UI, 16, "bold"), fg=INK, bg="white").pack(side="left")
+        info = self._info_button(titlebar, "按模板在冒号后填写；写不全也可以，后台 Claude 会先读取项目目录里的现有文件。\n\n"
+                                                  "提交方式：可以复制后粘贴到 Claude 对话，也可以直接交给后台 Claude 办理。\n\n"
+                                                  "后台办理包括：写监控脚本、登记到总台、按指定周期启动监控，并按你的允许/禁止范围处理后续问题。")
+        info.pack(side="right")
         f, t = self._textbox(w, height=22, font=(UI, 12), editable=True)
         f.pack(fill="both", expand=True, padx=16, pady=8)
         t.insert("1.0", REQUEST_TEMPLATE)
@@ -1582,8 +1850,7 @@ class Hub(tk.Tk):
 
     def _qa_restore(self, pid):
         st = self._qa_state_for(pid)
-        hint = [("在下面输入问题，例如：“现在进度怎样？”“上一次后台处理做了什么？”“哪个作业最慢，为什么？”", "hint")]
-        self._set(self.qa_text, st["lines"] or hint)
+        self._set(self.qa_text, st["lines"])
         self.qa_text.see("end")
 
     def _qa_log(self, line, tag=None):
@@ -1708,6 +1975,7 @@ class Hub(tk.Tk):
         self.qa_btn.configure(state="normal")
 
     def _close(self):
+        self._tip_hide()
         if isinstance(self.qa_proc, subprocess.Popen) and self.qa_proc.poll() is None:
             self.qa_proc.kill()
         self.destroy()

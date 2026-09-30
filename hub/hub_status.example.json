@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "updated": "2026-09-29T10:00:00",
+  "headline": "3 个任务中 1 个完成、1 个运行、1 个排队，无需人工处理。",
+  "summary": "",
+  "done": false,
+  "table": {
+    "cols": ["任务", "作业号", "状态", "进度", "结果"],
+    "rows": [
+      ["slab_clean", "—", "完成", "最终单点", "-247.31718 eV"],
+      ["slab_CO_bridge", "100245", "R 12:40:05", "离子步 31，Fmax 0.041", "-262.8801 eV"],
+      ["slab_O_hcp", "100248", "Q", "排队中", "—"]
+    ],
+    "tags": ["done", "run", "queue"],
+    "row_meta": [
+      {
+        "task_id": "slab_clean",
+        "host": "vanda",
+        "open_path": "D:\\Research\\CeOx\\slab_clean",
+        "result": "D:\\Research\\CeOx\\results\\slab_clean.md",
+        "params": {
+          "ENCUT_eV": 450,
+          "ISMEAR": 1,
+          "SIGMA_eV": 0.1,
+          "U_Ce_eV": 5.0
+        }
+      },
+      {
+        "task_id": "slab_CO_bridge",
+        "job_id": "100245",
+        "host": "vanda",
+        "open_path": "D:\\Research\\CeOx\\slab_CO_bridge",
+        "log": "D:\\Research\\CeOx\\slab_CO_bridge\\OUTCAR",
+        "script": "monitor__ceox-rh__hpc__300m.py",
+        "command": "qsub run.pbs",
+        "params": {
+          "ENCUT_eV": 450,
+          "ISMEAR": 1,
+          "SIGMA_eV": 0.1,
+          "U_Ce_eV": 5.0,
+          "NSW": 200,
+          "EDIFFG_eV_A": -0.02
+        }
+      },
+      {
+        "task_id": "slab_O_hcp",
+        "job_id": "100248",
+        "host": "vanda",
+        "open_path": "D:\\Research\\CeOx\\slab_O_hcp",
+        "command": "qsub run.pbs",
+        "params": {
+          "ENCUT_eV": 450,
+          "U_Ce_eV": 5.0
+        }
+      }
+    ]
+  },
+  "attention": [],
+  "working": "",
+  "notes": ["scratch 配额：78.5 / 500 G（15.7%）"],
+  "next": "2026-09-29T15:00:00",
+  "results": [
+    {
+      "label": "总结果表",
+      "path": "D:\\Research\\CeOx\\results\\RESULTS.md"
+    }
+  ],
+  "error": ""
+}

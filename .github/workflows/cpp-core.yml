@@ -1,0 +1,45 @@
+name: C++ core
+
+concurrency:
+  group: cpp-core-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cpp/**'
+      - 'hub/**'
+      - 'tests/**'
+      - 'docs/MONITOR_NAMING.md'
+      - '.github/workflows/cpp-core.yml'
+  pull_request:
+    paths:
+      - 'cpp/**'
+      - 'hub/**'
+      - 'tests/**'
+      - 'docs/MONITOR_NAMING.md'
+      - '.github/workflows/cpp-core.yml'
+
+jobs:
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: cpp/vcpkg.json
+      - name: Python contract checks
+        shell: pwsh
+        run: |
+          python -m py_compile hub/monitor_hub.py hub/naming.py hub/status_contract.py hub/validate_status.py tests/demo/make_demo.py tests/naming_test.py tests/status_contract_test.py
+          python tests/naming_test.py
+          python tests/status_contract_test.py
+          python hub/validate_status.py hub/hub_status.example.json
+      - name: Configure
+        shell: pwsh
+        run: cmake -S cpp -B cpp/build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+      - name: Build
+        run: cmake --build cpp/build --config Release
+      - name: Test
+        run: ctest --test-dir cpp/build -C Release --output-on-failure

@@ -2,7 +2,7 @@
 
 一个 Windows 桌面小程序，把本机上所有长时间计算任务的监控集中到一个窗口里。任务可以在本机跑（机器学习训练、数据处理），也可以在 HPC 集群的 PBS 上跑（VASP 等）。在这个窗口里你可以：
 
-- **看完成情况**：每个项目一张卡片，状态一眼看清（⚠ 需要你处理 / ⟳ 后台处理中 / ● 正常 / ✔ 已完成 / ⏸ 已暂停）。
+- **看完成情况**：每个项目一张卡片，状态一眼看清（⚠ 需要你处理 / ⟳ 后台处理中 / ● 正常 / ✔ 已完成 / ⏸ 已暂停）。进度表支持任务下钻：新格式监控提供 `row_meta` 后，双击一行可直接打开该任务目录、日志或结果文件。
 - **看后台 Claude 的处理过程**：监控发现自己处理不了的问题时，会启动一个无头 Claude（`claude -p`）按规程处理。它读了什么、运行了什么命令、得到什么结果，都能实时看到。
 - **看最终结果**：计算全部完成后，结果表和 RESULTS.md 直接在窗口里打开。
 - **提问**：用中文问这个项目的情况。提问会话是真正只读的（只能读文件，不能运行命令、不能改文件）。
@@ -38,7 +38,11 @@ pythonw hub\monitor_hub.py
 
 - 程序顶部的常量（`CLAUDE`、`PWSH`、`HUB_DATA`、`DETACH`）是作者机器上的路径，换机器时要改。
 - 定时任务的启动程序必须写成 `conhost.exe --headless powershell.exe …`，否则会闪窗（见 [docs/LESSONS_LEARNED.md](docs/LESSONS_LEARNED.md) A2）。
-- 新监控写出的状态文件格式：[hub/hub_status.schema.json](hub/hub_status.schema.json)。
+- 新监控写出的状态文件格式：[hub/hub_status.schema.json](hub/hub_status.schema.json)。每行任务可带 `table.row_meta` 供总台打开具体任务和读取参数。
+- 可直接照抄的完整状态示例：[hub/hub_status.example.json](hub/hub_status.example.json)。新 monitor 建议写 `schema_version: 1`。
+- 写完状态文件后可运行 `python hub/validate_status.py <path-to-hub_status.json>` 做结构检查；格式错误会返回非零退出码。
+- 新监控脚本 / 定时任务的机器可读命名规范见 [docs/MONITOR_NAMING.md](docs/MONITOR_NAMING.md)。
+- 界面把运行状态与帮助文案分开：状态常驻，说明性文字使用按钮 hover tooltip；规则见 [docs/UI_GUIDELINES.md](docs/UI_GUIDELINES.md)。
 
 不想碰真实项目、只想先看效果：
 ```
