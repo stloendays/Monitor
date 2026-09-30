@@ -63,5 +63,19 @@ jobs:
           if ($text -match "must-not-leak" -or $text -match "oauth_token") {
             throw "native Claude statusLine snapshot leaked a non-allow-listed field"
           }
+      - name: Live Windows probe CLI smoke
+        shell: pwsh
+        run: |
+          $output = .\cpp\build\Release\monitor_hub_cli.exe --probe-system
+          if ($LASTEXITCODE -ne 0) {
+            throw "live Windows probe failed with exit code $LASTEXITCODE"
+          }
+          $probe = ($output -join [Environment]::NewLine) | ConvertFrom-Json
+          if ($null -eq $probe.tasks -or $null -eq $probe.procs -or $null -eq $probe.error) {
+            throw "raw probe JSON is missing tasks/procs/error"
+          }
+          if ($probe.error) {
+            throw "live Windows probe reported an error: $($probe.error)"
+          }
       - name: Test
         run: ctest --test-dir cpp/build -C Release --output-on-failure
