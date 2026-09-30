@@ -25,6 +25,7 @@ bool set_launch_at_login(bool enabled, QString* error_message = nullptr);
 bool running_from_development_checkout();
 QString desktop_settings_storage();
 QString desktop_startup_command();
+QString desktop_orchestrator_program();
 QString desktop_diagnostics_text();
 
 }  // namespace monitor_hub
