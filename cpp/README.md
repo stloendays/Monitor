@@ -13,7 +13,8 @@ Implemented so far:
 - detached monitor auto-discovery under the cdesktop job root;
 - detached and glob-style Claude takeover history indexing;
 - deterministic `--system-info FILE` fixtures for CI and compatibility tests;
-- `monitor_hub_cli --dump` JSON output;
+- `monitor_hub_cli --dump` normalized JSON output;
+- `monitor_hub_cli --probe-system` raw read-only Task Scheduler/WMI JSON output;
 - Windows/MSVC CI and unit tests.
 
 Still handled by Python and scheduled for later phases:
@@ -51,3 +52,39 @@ $env:MONITOR_HUB_NO_DISCOVERY="1"
 ```
 
 The production Python GUI remains the fallback until the Qt UI and management/Q&A surfaces have parity tests. The C++ CLI now uses live Task Scheduler + WMI probing by default; pass `--system-info FILE` to force deterministic fixture data.
+
+
+## Raw Windows system probe
+
+Use the raw probe when debugging the local Windows integration itself rather than asking for the normalized project view:
+
+```powershell
+.\build\Release\monitor_hub_cli.exe --probe-system
+```
+
+The command is read-only and returns:
+
+```json
+{
+  "tasks": {},
+  "procs": [],
+  "error": ""
+}
+```
+
+- `tasks` contains Monitor-related Task Scheduler records discovered by the platform adapter.
+- `procs` contains the selected PowerShell/Python/Claude/Node process metadata already used by Monitor Hub.
+- `error` is empty on a successful live probe and contains the platform diagnostic otherwise.
+
+`--probe-system` is intentionally distinct from `--dump`:
+
+- `--probe-system` = raw platform evidence for diagnostics;
+- `--dump` = normalized Monitor Hub projects/tasks/health projection.
+
+For deterministic tests, the same action accepts the existing fixture override:
+
+```powershell
+.\build\Release\monitor_hub_cli.exe --probe-system --system-info tests\fixture_system.json
+```
+
+The action does not register/modify scheduled tasks, terminate processes, restart jobs, or change monitor configuration.
