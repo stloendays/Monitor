@@ -3,6 +3,7 @@
 #include "monitor_hub/core.hpp"
 
 #include <filesystem>
+#include <iosfwd>
 #include <optional>
 #include <string>
 #include <vector>
@@ -56,5 +57,11 @@ ClaudeCliStatus load_claude_cli_status(
 std::string match_claude_workspace_project(
     const ClaudeCliStatus& status,
     const std::vector<json::object>& projects);
+
+int run_claude_statusline_bridge(
+    std::istream& input,
+    std::ostream& output,
+    const RuntimePaths& paths,
+    std::string* diagnostic = nullptr);
 
 }  // namespace monitor_hub

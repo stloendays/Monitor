@@ -199,23 +199,39 @@ QString activity_time_text(const std::optional<double>& epoch) {
     return when.toString(QStringLiteral("MM-dd HH:mm"));
 }
 
-QString claude_bridge_path() {
+QString quoted_command(const QString& path) {
+    return QStringLiteral("\"%1\"").arg(QFileInfo(path).absoluteFilePath());
+}
+
+QString claude_bridge_command() {
     const auto explicit_path = qEnvironmentVariable("MONITOR_HUB_CLAUDE_BRIDGE");
-    if (!explicit_path.isEmpty() && QFileInfo::exists(explicit_path))
-        return explicit_path;
+    if (!explicit_path.isEmpty() && QFileInfo::exists(explicit_path)) {
+        if (explicit_path.endsWith(QStringLiteral(".py"), Qt::CaseInsensitive))
+            return QStringLiteral("python %1").arg(quoted_command(explicit_path));
+        return quoted_command(explicit_path);
+    }
 
     const auto app_dir = QCoreApplication::applicationDirPath();
-    const QStringList candidates = {
+#ifdef _WIN32
+    const auto native_cli = app_dir + QStringLiteral("/monitor_hub_cli.exe");
+#else
+    const auto native_cli = app_dir + QStringLiteral("/monitor_hub_cli");
+#endif
+    if (QFileInfo::exists(native_cli))
+        return quoted_command(native_cli) + QStringLiteral(" --claude-statusline");
+
+    const QStringList python_candidates = {
         QStringLiteral(R"(D:\Research\Monitor\hub\claude_statusline_bridge.py)"),
         app_dir + QStringLiteral("/../share/monitor_hub/claude_statusline_bridge.py"),
         app_dir + QStringLiteral("/../../hub/claude_statusline_bridge.py"),
         app_dir + QStringLiteral("/../../../hub/claude_statusline_bridge.py"),
     };
-    for (const auto& path : candidates)
-        if (QFileInfo::exists(path)) return QFileInfo(path).absoluteFilePath();
+    for (const auto& path : python_candidates) {
+        if (QFileInfo::exists(path))
+            return QStringLiteral("python %1").arg(quoted_command(path));
+    }
 
-    // Preserve the user's established repository layout as the copyable fallback.
-    return QStringLiteral(R"(D:\Research\Monitor\hub\claude_statusline_bridge.py)");
+    return QStringLiteral(R"(python "D:\Research\Monitor\hub\claude_statusline_bridge.py")");
 }
 
 void set_usage_bar(QProgressBar* bar,
@@ -1799,12 +1815,12 @@ void QtMainWindow::open_new_monitor_dialog() {
 }
 
 void QtMainWindow::copy_claude_statusline_setup() {
-    const auto bridge = claude_bridge_path();
+    const auto bridge_command = claude_bridge_command();
     const auto command =
-        QStringLiteral("/statusline 请把下面命令接入 Claude Code 状态栏：python \"%1\"。"
+        QStringLiteral("/statusline 请把下面命令接入 Claude Code 状态栏：%1。"
                        "如果我已经配置了 statusLine，请保留并合并原有状态栏行为，不要静默覆盖；"
                        "确保这个 bridge 的 stdout 仍作为可见状态栏输出。")
-            .arg(bridge);
+            .arg(bridge_command);
     QApplication::clipboard()->setText(command);
     if (claude_updated_)
         claude_updated_->setText(QStringLiteral("接入指令已复制，粘贴到 Claude CLI"));
