@@ -144,7 +144,9 @@ void update_issue_projection(
 
     if (event.issue_id.empty()) {
         if (starts_with(event.event_type, "issue."))
-            append_diagnostic(out, event.event_id + ": issue event missing issue_id");
+            append_diagnostic(
+                out,
+                event.event_id + ": issue event missing issue_id");
         return;
     }
 
@@ -159,24 +161,50 @@ void update_issue_projection(
     auto& issue = out.issues[found->second];
 
     if (!event.task_id.empty()) issue.task_id = event.task_id;
-    if (!event.agent_run_id.empty()) issue.agent_run_id = event.agent_run_id;
-    if (!event.authority.empty()) issue.authority = event.authority;
+    if (!event.agent_run_id.empty())
+        issue.agent_run_id = event.agent_run_id;
+    if (!event.authority.empty())
+        issue.authority = event.authority;
     issue.last_event_at = event.occurred_at;
 
     if (starts_with(event.event_type, "issue.")) {
         issue.state = suffix_after_dot(event.event_type);
         if (!event.summary.empty()) issue.summary = event.summary;
 
-        if (event.event_type == "issue.user_action_required") {
+        if (event.event_type == "issue.detected") {
+            issue.agent_active = false;
+            issue.agent_completed = false;
+            issue.agent_failed = false;
+            issue.action_applied = false;
+            issue.task_restarted = false;
+            issue.recovery_started = false;
+            issue.recovery_verified = false;
+            issue.user_action_required = false;
+            issue.resolved = false;
+        } else if (event.event_type ==
+                   "issue.user_action_required") {
             issue.user_action_required = true;
             issue.resolved = false;
             if (issue.authority.empty()) issue.authority = "L3";
-        } else if (event.event_type == "issue.escalated" && issue.authority == "L3") {
+        } else if (event.event_type == "issue.escalated" &&
+                   issue.authority == "L3") {
             issue.user_action_required = true;
+            issue.resolved = false;
+        } else if (event.event_type == "issue.action_applied") {
+            issue.action_applied = true;
+            issue.resolved = false;
+        } else if (event.event_type == "issue.recovery_started") {
+            issue.recovery_started = true;
+            issue.resolved = false;
+        } else if (event.event_type == "issue.recovery_verified") {
+            issue.recovery_started = true;
+            issue.recovery_verified = true;
+            issue.user_action_required = false;
             issue.resolved = false;
         } else if (event.event_type == "issue.resolved") {
             issue.resolved = true;
             issue.user_action_required = false;
+            issue.agent_active = false;
         } else {
             issue.resolved = false;
         }
@@ -189,13 +217,42 @@ void update_issue_projection(
     }
 
     if (starts_with(event.event_type, "agent.")) {
-        if (!event.summary.empty()) issue.current_action = event.summary;
+        if (issue.authority.empty()) issue.authority = "L2";
+        if (!event.summary.empty())
+            issue.current_action = event.summary;
+
+        if (event.event_type == "agent.started" ||
+            event.event_type == "agent.action_started") {
+            issue.agent_active = true;
+            issue.agent_completed = false;
+            issue.agent_failed = false;
+        } else if (event.event_type == "agent.action_finished") {
+            issue.agent_active = false;
+            issue.action_applied = true;
+        } else if (event.event_type == "agent.completed") {
+            issue.agent_active = false;
+            issue.agent_completed = true;
+            issue.agent_failed = false;
+        } else if (event.event_type == "agent.failed") {
+            issue.agent_active = false;
+            issue.agent_completed = false;
+            issue.agent_failed = true;
+        }
         return;
     }
 
-    if (event.event_type == "task.restarted" && !event.summary.empty())
-        issue.current_action = event.summary;
+    if (event.event_type == "task.restarted") {
+        issue.task_restarted = true;
+        issue.action_applied = true;
+        if (issue.authority.empty() &&
+            event.source_kind == "core" &&
+            event.source_id == "monitor-hub-dispatch-worker")
+            issue.authority = "L1";
+        if (!event.summary.empty())
+            issue.current_action = event.summary;
+    }
 }
+
 
 }  // namespace
 
@@ -270,6 +327,7 @@ ProjectEventProjection load_project_event_projection(
 std::string event_display_name(const std::string& event_type) {
     static const std::map<std::string, std::string> names = {
         {"project.completed", "项目完成"},
+        {"monitor.check_completed", "监控检查完成"},
         {"task.started", "任务开始"},
         {"task.progress", "任务进度"},
         {"task.failed", "任务失败"},
@@ -318,6 +376,78 @@ std::string issue_state_display_name(const std::string& state) {
     };
     const auto found = names.find(state);
     return found == names.end() ? state : found->second;
+}
+
+std::string issue_recovery_stage(const IssueProjection& issue) {
+    if (issue.resolved) return "resolved";
+    if (issue.user_action_required) return "needs_user";
+    if (issue.agent_failed) return "failed";
+    if (issue.recovery_verified) return "recovery_verified";
+    if (issue.recovery_started) return "recovery_verification";
+    if (issue.task_restarted || issue.action_applied)
+        return "waiting_verification";
+    if (issue.agent_active) return "agent_handling";
+    if (issue.agent_completed) return "agent_completed";
+    if (issue.state == "action_selected") return "action_selected";
+    if (issue.state == "investigating") return "investigating";
+    if (issue.state == "assigned") return "assigned";
+    if (issue.state == "classified") return "classified";
+    if (issue.state == "escalated") return "escalated";
+    if (issue.state == "detected") return "detected";
+    return issue.state.empty() ? "waiting" : issue.state;
+}
+
+std::string issue_recovery_stage_display_name(
+    const std::string& stage) {
+    static const std::map<std::string, std::string> names = {
+        {"detected", "已发现问题"},
+        {"classified", "已完成分类"},
+        {"assigned", "已完成分派"},
+        {"investigating", "正在调查"},
+        {"agent_handling", "Child Agent 正在处理"},
+        {"agent_completed", "Agent 已完成，等待后续处理"},
+        {"action_selected", "已选择恢复动作"},
+        {"waiting_verification", "动作已完成，等待恢复验证"},
+        {"recovery_verification", "正在验证恢复"},
+        {"recovery_verified", "恢复已验证"},
+        {"resolved", "问题已解决"},
+        {"needs_user", "等待用户/主 Agent 决策"},
+        {"failed", "自动处理失败"},
+        {"escalated", "问题已升级"},
+        {"waiting", "等待更多事件"},
+    };
+    const auto found = names.find(stage);
+    return found == names.end() ? stage : found->second;
+}
+
+std::string issue_recovery_next_step(const IssueProjection& issue) {
+    const auto stage = issue_recovery_stage(issue);
+    if (stage == "resolved") return "无";
+    if (stage == "needs_user")
+        return "等待用户/主 Agent 记录明确决定";
+    if (stage == "failed")
+        return "查看失败证据并升级或重新选择受权动作";
+    if (stage == "recovery_verified")
+        return "等待 issue.resolved 关闭问题";
+    if (stage == "recovery_verification")
+        return "按完成标准检查下游运行证据";
+    if (stage == "waiting_verification")
+        return "Monitor 独立验证恢复，不以动作成功代替恢复";
+    if (stage == "agent_handling")
+        return "等待 Child Agent 记录证据、分析或受限动作";
+    if (stage == "agent_completed")
+        return "Monitor/Policy 根据 Agent 结论继续处理";
+    if (stage == "action_selected")
+        return "执行已授权的恢复动作";
+    if (stage == "assigned" || stage == "investigating")
+        return "收集证据并在 Policy 权限内选择动作";
+    if (stage == "classified")
+        return "按 Recovery Policy 分派 L1/L2/L3";
+    if (stage == "escalated")
+        return "等待升级路径接管";
+    if (stage == "detected")
+        return "分类问题并匹配 Recovery Policy";
+    return "等待下一条协议事件";
 }
 
 }  // namespace monitor_hub
