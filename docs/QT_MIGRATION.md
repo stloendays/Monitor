@@ -16,7 +16,14 @@ The optional `monitor_hub_qt` target currently provides a read-only operational 
 - copy-command action that never executes the command;
 - takeover-history table;
 - final-results table;
-- selection persistence by `task_id` within a project.
+- selection persistence by `task_id` within a project;
+- repository-owned PNG/SVG application icon resources;
+- native Windows executable `.ico` resource;
+- per-user single-instance desktop behavior;
+- second-launch activation of the existing window;
+- system-tray background presence;
+- close-to-tray behavior with explicit **Quit**;
+- optional `--background` launch mode.
 
 The Python/Tkinter app remains the production fallback until the remaining surfaces reach parity.
 
@@ -29,17 +36,31 @@ The Qt UI follows `docs/UI_GUIDELINES.md`:
 - panel-level help uses a small info button;
 - errors are never hidden inside a tooltip.
 
+Desktop lifecycle behavior is documented separately in `docs/DESKTOP_LIFECYCLE.md`.
+
 ## Build
 
 Qt is optional and disabled by default so core CI stays lightweight.
 
-With Qt 6.5+ Widgets available through your normal Qt installation or package manager:
+With Qt 6.5+ Widgets + Network available through your normal Qt installation or package manager:
 
 ```powershell
 cmake -S cpp -B cpp/build-qt `
   -DMONITOR_HUB_BUILD_QT=ON `
   -DCMAKE_PREFIX_PATH="C:\\Qt\\6.8.3\\msvc2022_64"
 cmake --build cpp/build-qt --config Release --target monitor_hub_qt
+```
+
+Normal foreground launch:
+
+```powershell
+.\cpp\build-qt\Release\monitor_hub_qt.exe
+```
+
+Background-first launch:
+
+```powershell
+.\cpp\build-qt\Release\monitor_hub_qt.exe --background
 ```
 
 The core-only build remains:
@@ -52,13 +73,17 @@ ctest --test-dir cpp/build -C Release --output-on-failure
 
 ## Not migrated yet
 
-The following still stay in Python:
+The following still stay in Python or in later desktop/release phases:
 
 - pause / resume / run-now / interval management;
 - read-only Claude Q&A;
 - new-monitor setup-agent launching;
 - Markdown and QoI-specific adapters;
 - rich transcript rendering / follow mode;
-- final Windows packaging, updater and release integration.
+- launch-at-login and persistent desktop settings;
+- installer/shortcut icon packaging;
+- notification routing from normalized project/issue events;
+- updater restart integration and packaged release installation;
+- crash-session recovery journals.
 
-These should be moved only after the read-only Qt shell has been visually and behaviorally checked against the Python fallback.
+These should be moved only after the read-only Qt shell and desktop lifecycle are visually and behaviorally checked against the Python fallback.

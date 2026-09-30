@@ -31,12 +31,36 @@ target_link_libraries(monitor_hub_cli PRIVATE monitor_hub_core)
 
 option(MONITOR_HUB_BUILD_QT "Build the Qt 6 desktop UI" OFF)
 if(MONITOR_HUB_BUILD_QT)
-    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Network)
     qt_add_executable(monitor_hub_qt WIN32
         src/qt_main.cpp
         src/qt_main_window.cpp
+        src/qt_desktop_controller.cpp
     )
-    target_link_libraries(monitor_hub_qt PRIVATE monitor_hub_core Qt6::Widgets)
+    qt_add_resources(monitor_hub_qt monitor_hub_resources
+        PREFIX "/monitor_hub"
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+        FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/monitor_hub.png"
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/monitor_hub.svg"
+    )
+    if(WIN32)
+        enable_language(RC)
+        set(MONITOR_HUB_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/monitor_hub.ico")
+        configure_file(
+            resources/monitor_hub.rc.in
+            "${CMAKE_CURRENT_BINARY_DIR}/monitor_hub.rc"
+            @ONLY
+        )
+        target_sources(monitor_hub_qt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/monitor_hub.rc")
+    endif()
+    target_link_libraries(monitor_hub_qt
+        PRIVATE
+            monitor_hub_core
+            Qt6::Widgets
+            Qt6::Network
+    )
+    target_compile_definitions(monitor_hub_qt PRIVATE MONITOR_HUB_VERSION="${PROJECT_VERSION}")
     if(MSVC)
         target_compile_options(monitor_hub_qt PRIVATE /W4 /permissive- /utf-8)
     else()
