@@ -33,6 +33,7 @@ public:
     explicit QtMainWindow(RuntimePaths paths, QWidget* parent = nullptr);
 
     std::vector<QtDesktopProjectState> desktop_project_states() const;
+    const RuntimePaths& runtime_paths() const noexcept { return paths_; }
 
 private:
     void build_ui();
