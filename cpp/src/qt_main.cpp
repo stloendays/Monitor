@@ -43,11 +43,15 @@ int main(int argc, char** argv) {
         else if (arg == "--no-discovery") paths.discovery = false;
         else if (arg == "--background") background_requested = true;
         else if (arg == "--desktop-diagnostics") diagnostics_requested = true;
+        else if (arg == "--version") {
+            std::cout << MONITOR_HUB_VERSION << "\n";
+            return 0;
+        }
         else if (arg == "--help" || arg == "-h") {
             std::cout
                 << "monitor_hub_qt [--registry FILE] [--hub-data DIR] "
                    "[--job-root DIR] [--no-discovery] [--background] "
-                   "[--desktop-diagnostics]\n";
+                   "[--desktop-diagnostics] [--version]\n";
             return 0;
         } else {
             std::cerr << "unknown argument: " << arg << "\n";
