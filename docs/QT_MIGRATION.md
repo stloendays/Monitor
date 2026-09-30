@@ -14,6 +14,8 @@ The optional `monitor_hub_qt` target currently provides a read-only operational 
 - cross-project recent Agent/takeover activity;
 - double-click drill-down from Overview into the corresponding project;
 - raw takeover evidence can be opened from the project takeover table;
+- newbie-friendly quick-debug action bar for refresh/path/status/log/result/takeover inspection;
+- context-aware command copy and bounded diagnostic-context copy without execution;
 - project headline and runner state;
 - progress table;
 - dedicated task-detail pane;
