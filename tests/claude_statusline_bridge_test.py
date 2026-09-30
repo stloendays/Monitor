@@ -51,10 +51,24 @@ def main() -> int:
         assert saved["rate_limits"]["five_hour"]["used_percentage"] == 24.0
         assert saved["rate_limits"]["seven_day"]["used_percentage"] == 13.0
         assert saved["context_window"]["used_percentage"] == 37.5
+        assert saved["workspace"]["current_dir"] == r"D:\\Research\\Monitor"
         serialized = json.dumps(saved)
         assert "must-not-leak" not in serialized
         assert "oauth_token" not in serialized
         assert "api_key" not in serialized
+
+        payload["rate_limits"]["five_hour"]["used_percentage"] = 1788062400
+        subprocess.run(
+            [sys.executable, str(BRIDGE)],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        invalid = json.loads(output.read_text(encoding="utf-8"))
+        assert "used_percentage" not in invalid["rate_limits"]["five_hour"]
+        assert invalid["rate_limits"]["five_hour"]["resets_at"] == 1788062400
 
     print("claude statusline bridge test passed")
     return 0
