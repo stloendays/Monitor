@@ -24,6 +24,21 @@ struct ClaudeCliStatus {
     std::string version;
     std::string model;
     std::string cwd;
+    std::string project_dir;
+    std::string git_worktree;
+
+    std::string session_id;
+    std::string session_name;
+    std::string prompt_id;
+    std::filesystem::path transcript_path;
+    std::string agent_name;
+    std::string agent_type;
+
+    std::string recent_tool;
+    std::optional<double> recent_tool_at;
+    std::string recent_agent;
+    std::optional<double> recent_agent_at;
+
     std::optional<double> observed_at;
     std::optional<double> context_used_percentage;
     std::optional<double> session_cost_usd;
