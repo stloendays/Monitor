@@ -188,6 +188,12 @@ if (Test-Path -LiteralPath $out) {
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
+Write-Host "Building configured CMake targets required by the install tree..."
+& cmake --build $build --config $Configuration
+if ($LASTEXITCODE -ne 0) {
+    throw "cmake --build failed with exit code $LASTEXITCODE"
+}
+
 Write-Host "Installing CMake targets into staging..."
 & cmake --install $build --config $Configuration --prefix $stage
 if ($LASTEXITCODE -ne 0) {
