@@ -53,7 +53,9 @@ jobs:
                 throw "GUI smoke timed out: $Argument"
               }
               if ($p.ExitCode -ne 0) {
-                $detail = (Get-Content $stderr -Raw -ErrorAction SilentlyContinue).Trim()
+                $errText = [string](Get-Content $stderr -Raw -ErrorAction SilentlyContinue)
+                $outText = [string](Get-Content $stdout -Raw -ErrorAction SilentlyContinue)
+                $detail = ($errText + "`n" + $outText).Trim()
                 throw "GUI smoke failed ($($p.ExitCode)): $Argument $detail"
               }
             } finally {
