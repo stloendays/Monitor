@@ -10,6 +10,8 @@ on:
       - 'cpp/**'
       - 'docs/DESKTOP_LIFECYCLE.md'
       - 'docs/QT_MIGRATION.md'
+      - 'docs/WINDOWS_PACKAGING.md'
+      - 'packaging/windows/**'
       - '.github/workflows/qt-ui.yml'
 
 jobs:
@@ -34,14 +36,133 @@ jobs:
           $qt = Join-Path $env:RUNNER_TEMP "Qt\6.8.3\msvc2022_64"
           cmake -S cpp -B cpp/build-qt -DMONITOR_HUB_BUILD_QT=ON -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DCMAKE_PREFIX_PATH="$qt"
 
-      - name: Build Qt target
+      - name: Build desktop targets
         shell: pwsh
-        run: cmake --build cpp/build-qt --config Release --target monitor_hub_qt
+        run: cmake --build cpp/build-qt --config Release --target monitor_hub_qt monitor_hub_cli
 
       - name: Desktop CLI smoke test
         shell: pwsh
         run: |
-          & ".\cpp\build-qt\Release\monitor_hub_qt.exe" --help
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ".\cpp\build-qt\Release\monitor_hub_qt.exe" --desktop-diagnostics
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $qtRoot = Join-Path $env:RUNNER_TEMP "Qt\6.8.3\msvc2022_64"
+          $qtBin = Join-Path $qtRoot "bin"
+          $env:PATH = "$qtBin;$env:PATH"
+          $env:QT_PLUGIN_PATH = Join-Path $qtRoot "plugins"
+
+          function Read-SmokeText([string]$Path) {
+            $value = Get-Content $Path -Raw -ErrorAction SilentlyContinue
+            if ($null -eq $value) { return "" }
+            return $value.Trim()
+          }
+
+          function Invoke-GuiSmoke([string]$Path, [string]$Argument) {
+            $stdout = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
+            $stderr = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
+            try {
+              $p = Start-Process -FilePath $Path -ArgumentList @($Argument) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+              if (-not $p.WaitForExit(30000)) {
+                Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                throw "GUI smoke timed out: $Argument"
+              }
+              $p.Refresh()
+              if ($p.ExitCode -ne 0) {
+                $out = Read-SmokeText $stdout
+                $err = Read-SmokeText $stderr
+                throw "GUI smoke failed ($($p.ExitCode)): $Argument stdout=[$out] stderr=[$err]"
+              }
+            } finally {
+              Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+            }
+          }
+          $exe = ".\cpp\build-qt\Release\monitor_hub_qt.exe"
+          Invoke-GuiSmoke $exe "--help"
+          Invoke-GuiSmoke $exe "--desktop-diagnostics"
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Package Windows desktop
+        shell: pwsh
+        run: |
+          $qt = Join-Path $env:RUNNER_TEMP "Qt\6.8.3\msvc2022_64\bin"
+          powershell -ExecutionPolicy Bypass -File packaging/windows/package_qt.ps1 -RepoRoot . -BuildDir cpp/build-qt -QtBin "$qt" -OutDir dist -BuildInstaller
+
+      - name: Verify update package contract
+        shell: pwsh
+        run: |
+          $verify = Join-Path $env:RUNNER_TEMP "MonitorHubUpdateVerify"
+          if (Test-Path $verify) { Remove-Item $verify -Recurse -Force }
+          Expand-Archive -LiteralPath .\dist\monitor-hub-windows-x64.zip -DestinationPath $verify
+          $manifest = Get-Content (Join-Path $verify "manifest.json") -Raw | ConvertFrom-Json
+          if ($manifest.format -ne 1) { throw "unsupported manifest format" }
+          foreach ($entry in $manifest.files) {
+            $path = Join-Path (Join-Path $verify "payload") ($entry.path -replace '/', '\')
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing payload file: $($entry.path)" }
+            $item = Get-Item -LiteralPath $path
+            if ($item.Length -ne [int64]$entry.size) { throw "size mismatch: $($entry.path)" }
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+            if ($hash -ne [string]$entry.sha256) { throw "hash mismatch: $($entry.path)" }
+          }
+          if (-not (Test-Path (Join-Path $verify "payload\.monitor-hub-release.json"))) { throw "release marker missing" }
+          $checksumPath = '.\dist\monitor-hub-windows-x64.zip.sha256'
+          if (-not (Test-Path $checksumPath)) { throw "archive checksum missing" }
+          $expected = ((Get-Content $checksumPath -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+          $actual = (Get-FileHash -Algorithm SHA256 .\dist\monitor-hub-windows-x64.zip).Hash.ToLowerInvariant()
+          if ($expected -ne $actual) { throw "archive checksum mismatch" }
+
+      - name: Installed package smoke test
+        shell: pwsh
+        run: |
+          function Read-SmokeText([string]$Path) {
+            $value = Get-Content $Path -Raw -ErrorAction SilentlyContinue
+            if ($null -eq $value) { return "" }
+            return $value.Trim()
+          }
+
+          function Invoke-GuiSmoke([string]$Path, [string]$Argument) {
+            $stdout = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
+            $stderr = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetRandomFileName())
+            try {
+              $p = Start-Process -FilePath $Path -ArgumentList @($Argument) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+              if (-not $p.WaitForExit(30000)) {
+                Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                throw "GUI smoke timed out: $Path $Argument"
+              }
+              $p.Refresh()
+              if ($p.ExitCode -ne 0) {
+                $out = Read-SmokeText $stdout
+                $err = Read-SmokeText $stderr
+                throw "GUI smoke failed ($($p.ExitCode)): $Path $Argument stdout=[$out] stderr=[$err]"
+              }
+            } finally {
+              Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+            }
+          }
+          $stagedExe = ".\dist\stage\bin\monitor_hub_qt.exe"
+          Invoke-GuiSmoke $stagedExe "--desktop-diagnostics"
+          $version = (Get-Content ".\dist\stage\VERSION" -Raw).Trim()
+          $installer = ".\dist\Monitor-Hub-$version-win64-setup.exe"
+          if (-not (Test-Path -LiteralPath $installer)) { throw "installer missing: $installer" }
+          $installDir = Join-Path $env:RUNNER_TEMP "MonitorHubInstalled"
+          if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
+          $install = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "installer failed: $($install.ExitCode)" }
+          $installedExe = Join-Path $installDir "bin\monitor_hub_qt.exe"
+          if (-not (Test-Path -LiteralPath $installedExe)) { throw "installed executable missing" }
+          Invoke-GuiSmoke $installedExe "--desktop-diagnostics"
+          $uninstaller = Join-Path $installDir "Uninstall.exe"
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "uninstaller failed: $($uninstall.ExitCode)" }
+          Start-Sleep -Seconds 1
+          if (Test-Path -LiteralPath $installedExe) { throw "installed executable remained after uninstall" }
+
+      - name: Upload packaging artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-hub-windows-package
+          path: |
+            dist/monitor-hub-windows-x64.zip
+            dist/monitor-hub-windows-x64.zip.sha256
+            dist/Monitor-Hub-*-win64-portable.zip
+            dist/Monitor-Hub-*-win64-setup.exe
+          if-no-files-found: error
