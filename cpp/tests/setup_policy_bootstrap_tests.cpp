@@ -103,6 +103,18 @@ int main() {
         prompt.find("NEEDS_USER:") !=
         std::string::npos);
     CHECK(
+        prompt.find("PROJECT_ID:") !=
+        std::string::npos);
+    CHECK(
+        prompt.find("monitor_hub_cli --agent-bind") !=
+        std::string::npos);
+    CHECK(
+        prompt.find("monitor_hub_cli --agent-post") !=
+        std::string::npos);
+    CHECK(
+        prompt.find("Do not create a new one-off Q&A Agent/session") !=
+        std::string::npos);
+    CHECK(
         prompt.find("monitor_hub_control --submit-command") !=
         std::string::npos);
     CHECK(
