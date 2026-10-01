@@ -23,7 +23,13 @@ The desktop lifecycle layer is intentionally separate from monitoring/business l
 - copyable desktop diagnostics;
 - repository-owned PNG/SVG icon resources for the Qt window and tray;
 - a native Windows `.ico` resource embedded into the Qt executable;
-- a per-user installer and portable/update package path derived from one CMake install tree.
+- a per-user installer and portable/update package path derived from one CMake install tree;
+- rotating per-user desktop application logs with a direct tray/shortcut entry;
+- persisted window geometry, selected project and selected tab;
+- clean/unclean desktop-session recovery marking;
+- durable-outbox desktop notification delivery without implicit acknowledgement;
+- advisory network outage/recovery handling with bounded retry;
+- an About surface and desktop keyboard shortcuts.
 
 The controller/settings code lives in `qt_desktop_controller.*` and
 `qt_desktop_settings.*`; the monitoring window does not own process-lifecycle policy.
@@ -151,12 +157,17 @@ Repeated identical health/summary state does not repeatedly notify.
 The desktop layer reads only the normalized project snapshot. It does not parse raw
 logs or invent a separate health policy.
 
+In addition, pending durable outbox entries targeted at the main Agent are surfaced
+once per desktop process. Showing the desktop message does not acknowledge the
+durable notification; acknowledgement remains an explicit outbox transition.
+
 ## Diagnostics
 
 The tray menu action **复制诊断信息** copies non-secret desktop runtime information
 such as version, Qt version, executable path, settings backend, development-checkout
 status, desktop preferences, automatic-control state, companion executable path, and
-whether a control tick is currently running.
+whether a control tick is currently running, the current application-log path,
+the remembered UI location, and advisory network-disconnected state.
 
 The same read-only diagnostic path is available for CI/support:
 
@@ -171,11 +182,10 @@ It does not modify startup registration or settings.
 This phase does **not** yet add:
 
 - a Windows Task Scheduler fallback for control ticks when the Qt app is not running;
-- an application log file / log viewer;
-- issue-level and agent-run-level event notifications;
+- a full in-app log viewer/filter (the rotating log directory is directly accessible);
+- rich issue/agent-run toast deep links beyond opening the main window;
 - updater restart integration;
-- crash-session recovery journals;
-- persisted window geometry and last-open project;
+- replayable crash journals beyond the clean/unclean session marker;
 
 Those should be layered on top of the current controller/settings boundary rather than
 implemented inside `QtMainWindow`.
@@ -203,5 +213,13 @@ At minimum:
 17. Automatic control never overlaps two orchestrator processes in one desktop instance.
 18. Disabling automatic control stops future ticks without broadening or mutating project policies.
 19. Explicit Quit stops both desktop timers and the owned one-shot orchestrator process.
+20. Window geometry, selected project and selected tab survive a clean restart.
+21. An unclean previous desktop session is detected without replaying control actions.
+22. The rotating application log remains bounded and its location is exposed in diagnostics.
+23. Pending durable outbox notifications are not implicitly acknowledged by desktop delivery.
+24. Explicit network disconnect/recovery changes desktop status and recovery triggers without redefining project health.
+25. Desktop settings/session-state round-trip tests pass in the Windows Qt workflow.
 
 The Windows packaging workflow now repeats diagnostics from a staged install and a silently installed NSIS build. Stable GitHub Release publishing remains a separate gated integration step.
+
+See `docs/DESKTOP_RESILIENCE.md` for the logging, session-state, outbox-notification, network-retry and shortcut details.
