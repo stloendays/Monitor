@@ -304,8 +304,7 @@ std::vector<ProjectAgentMessage> pending_project_agent_questions(
     for (const auto& message : channel.messages) {
         if (message.target != "project_agent") continue;
         if (message.kind != "question" &&
-            message.kind != "instruction" &&
-            message.kind != "monitor_request") {
+            message.kind != "instruction") {
             continue;
         }
         if (answered.count(message.message_id)) continue;
