@@ -412,6 +412,35 @@ QTableCornerButton::section {
     border: none;
 }
 
+QWidget#qaTab {
+    background: #FAF9F6;
+}
+
+QTextEdit#qaHistory {
+    color: #45423D;
+    background: #FFFFFF;
+    border: 1px solid #E8E6E0;
+    border-radius: 12px;
+    padding: 11px;
+    selection-background-color: #ECEAE4;
+    selection-color: #272622;
+}
+
+QTextEdit#qaInput {
+    color: #34322E;
+    background: #FCFBF8;
+    border: 1px solid #DFDCD4;
+    border-radius: 12px;
+    padding: 10px;
+    selection-background-color: #E7E5DF;
+    selection-color: #272622;
+}
+
+QTextEdit#qaInput:focus {
+    background: #FFFFFF;
+    border-color: #CFCBC3;
+}
+
 QTextEdit#notesPanel {
     color: #625F58;
     background: #F4F3EF;
