@@ -314,6 +314,26 @@ std::vector<ProjectAgentMessage> pending_project_agent_questions(
     return pending;
 }
 
+std::optional<ProjectAgentBinding> project_agent_binding_from_json(
+    const json::value& value,
+    std::string* error) {
+
+    if (!value.is_object()) {
+        if (error) *error = "Agent binding must be a JSON object";
+        return std::nullopt;
+    }
+    auto binding = parse_binding(value.as_object());
+    if (binding.empty()) {
+        if (error) *error = "Agent binding has no usable identity";
+        return std::nullopt;
+    }
+    if (binding.schema_version != 1) {
+        if (error) *error = "unsupported Agent binding schema_version";
+        return std::nullopt;
+    }
+    return binding;
+}
+
 json::object project_agent_binding_to_json(
     const ProjectAgentBinding& binding) {
 
