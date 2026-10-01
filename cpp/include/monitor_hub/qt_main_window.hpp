@@ -7,6 +7,8 @@
 #include <QMainWindow>
 #include <QString>
 
+#include "monitor_hub/qt_desktop_settings.hpp"
+
 #include <map>
 #include <string>
 #include <vector>
@@ -35,10 +37,14 @@ public:
     explicit QtMainWindow(RuntimePaths paths, QWidget* parent = nullptr);
 
     std::vector<QtDesktopProjectState> desktop_project_states() const;
+    DesktopUiState desktop_ui_state() const;
+    void restore_desktop_ui_state(const DesktopUiState& state);
+    void trigger_refresh();
     const RuntimePaths& runtime_paths() const noexcept { return paths_; }
 
 private:
     void build_ui();
+    void install_shortcuts();
     void refresh();
     void render_context_header();
     void render_claude_cli_status();
