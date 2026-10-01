@@ -537,7 +537,7 @@ void QtDesktopController::install_shortcuts() {
     });
 
     auto* about_shortcut =
-        new QShortcut(QKeySequence(Qt::Key_F1), window_);
+        new QShortcut(QKeySequence(QStringLiteral("F1")), window_);
     connect(about_shortcut, &QShortcut::activated, this, [this] {
         show_about_dialog();
     });
