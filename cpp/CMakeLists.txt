@@ -116,6 +116,7 @@ if(BUILD_TESTING)
             monitor_hub_qt_desktop_settings_tests
             tests/qt_desktop_settings_tests.cpp
             src/qt_desktop_settings.cpp
+            src/qt_app_logger.cpp
         )
         target_include_directories(
             monitor_hub_qt_desktop_settings_tests
@@ -123,7 +124,7 @@ if(BUILD_TESTING)
         )
         target_link_libraries(
             monitor_hub_qt_desktop_settings_tests
-            PRIVATE Qt6::Core
+            PRIVATE Qt6::Core Qt6::Gui
         )
         add_test(
             NAME monitor_hub_qt_desktop_settings_tests
