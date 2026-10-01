@@ -102,6 +102,65 @@ int main() {
     assert(std::string(invalid.at("problem").as_string()).find("状态文件格式错误") != std::string::npos);
     assert(!invalid.at("extras").as_array().empty());
 
+    // Legacy Markdown adapter remains supported on the current Qt/C++ release line.
+    const auto md_status = root / "status_latest.md";
+    const auto md_done = root / "DONE";
+    write_file(md_status,
+        "# monitor\n"
+        "计算正常。\n\n"
+        "| 作业 | 状态 | 进度 |\n"
+        "|---|---|---|\n"
+        "| slab_clean | 完成 | 最终单点 |\n"
+        "| slab_CO | R 02:14 | 离子步 31 |\n"
+        "| outside | R | 非监控 |\n\n"
+        "下次检查：09-29 18:00\n\n"
+        "**备注**\n"
+        "- scratch 正常\n");
+    write_file(md_done, "DONE\n");
+    json::object mp;
+    mp["id"] = "markdown-demo";
+    mp["adapter"] = "markdown";
+    mp["status_md"] = md_status.string();
+    mp["done_file"] = md_done.string();
+    json::object mr;
+    mr["kind"] = "none";
+    mp["runner"] = mr;
+    mp["runner_text"] = "fixture";
+    const auto ms = snapshot(mp, SystemInfo{}, paths);
+    assert(ms.at("health").as_string() == "done");
+    assert(ms.at("summary").as_string() ==
+           "完成 1，运行 1；另有 1 个作业不归这个监控管");
+    assert(ms.at("notes").as_array()[0].as_string() == "scratch 正常");
+    assert(ms.at("next").as_string() == "09-29 18:00");
+
+    // QoI adapter consumes live checkpoint overrides without changing the registry contract.
+    const auto qoi_status = root / "qoi_status.json";
+    write_file(qoi_status,
+        R"({"updated":"2026-09-29T10:00:00","rows":[)"
+        R"({"job":"fold1","status":"COMPLETE","checkpoints":1200,"failures":0,"total":1200,"rate_per_h":142.5,"branch_pushed":true,"params":{"fold":1}},)"
+        R"({"job":"fold2","status":"RUNNING","checkpoints":610,"failures":1,"total":1200,"last_checkpoint_min_ago":9,"rate_per_h":138.2,"eta_h":4.3,"branch_pushed":false,"workdir":"C:/qoi/fold2","params":{"fold":2,"seed":43}})"
+        R"(],"live":{"fold2":{"checkpoints":642,"failures":1,"newest_checkpoint":"2026-09-29T09:58:00"}},"notify":[],"attention":[]})");
+    json::object qp;
+    qp["id"] = "qoi-demo";
+    qp["adapter"] = "qoi";
+    qp["status_json"] = qoi_status.string();
+    json::object qr;
+    qr["kind"] = "none";
+    qr["interval_min"] = 15;
+    qp["runner"] = qr;
+    qp["runner_text"] = "fixture";
+    const auto qs = snapshot(qp, SystemInfo{}, paths);
+    const auto& qt = qs.at("table").as_object();
+    assert(qt.at("rows").as_array().size() == 2);
+    assert(qt.at("rows").as_array()[1].as_array()[2].as_string() ==
+           "642 / 1200（53.5%）");
+    assert(qt.at("tags").as_array()[0].as_string() == "done");
+    assert(qt.at("tags").as_array()[1].as_string() == "run");
+    assert(qt.at("row_meta").as_array()[1].as_object().at("open_path").as_string() ==
+           "C:/qoi/fold2");
+    assert(qs.at("summary").as_string() ==
+           "1/2 个作业已完成；fold2 53.5%，约 4.3 小时 进行中");
+
     // Detached runners are resolved from pid/exitcode files plus the WMI-style process list.
     const auto job = paths.job_root / "demo__monitor__local__15m";
     write_file(job / "pid", "4242\n");

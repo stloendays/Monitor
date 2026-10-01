@@ -13,6 +13,8 @@ namespace {
 constexpr auto kCloseToTray = "desktop/close_to_tray";
 constexpr auto kNotifications = "desktop/notifications";
 constexpr auto kAutomaticControl = "desktop/automatic_control";
+constexpr auto kRegistryPath = "runtime/registry_path";
+constexpr auto kHubDataPath = "runtime/hub_data_path";
 constexpr auto kStartupValueName = "Monitor Hub";
 
 #ifdef Q_OS_WIN
@@ -40,6 +42,8 @@ DesktopSettings load_desktop_settings() {
     out.close_to_tray = settings.value(kCloseToTray, true).toBool();
     out.notifications = settings.value(kNotifications, true).toBool();
     out.automatic_control = settings.value(kAutomaticControl, true).toBool();
+    out.registry_path = settings.value(kRegistryPath).toString();
+    out.hub_data_path = settings.value(kHubDataPath).toString();
     out.launch_at_login = launch_at_login_enabled();
     return out;
 }
@@ -55,6 +59,21 @@ bool save_desktop_preferences(
     settings.setValue(kAutomaticControl, automatic_control);
     settings.sync();
 
+    if (settings.status() != QSettings::NoError) {
+        if (error_message) *error_message = settings_error_text(settings.status());
+        return false;
+    }
+    return true;
+}
+
+bool save_runtime_locations(
+    const QString& registry_path,
+    const QString& hub_data_path,
+    QString* error_message) {
+    QSettings settings;
+    settings.setValue(kRegistryPath, registry_path.trimmed());
+    settings.setValue(kHubDataPath, hub_data_path.trimmed());
+    settings.sync();
     if (settings.status() != QSettings::NoError) {
         if (error_message) *error_message = settings_error_text(settings.status());
         return false;
@@ -163,6 +182,8 @@ QString desktop_diagnostics_text() {
           << QStringLiteral("automatic_control=%1").arg(
                  settings.automatic_control ? QStringLiteral("true")
                                             : QStringLiteral("false"))
+          << QStringLiteral("registry_path=%1").arg(settings.registry_path)
+          << QStringLiteral("hub_data_path=%1").arg(settings.hub_data_path)
           << QStringLiteral("launch_at_login=%1").arg(
                  settings.launch_at_login ? QStringLiteral("true")
                                           : QStringLiteral("false"));

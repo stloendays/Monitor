@@ -5,6 +5,7 @@
 #include "monitor_hub/event_store.hpp"
 
 #include <QMainWindow>
+#include <QString>
 
 #include <map>
 #include <string>
@@ -17,6 +18,7 @@ class QProgressBar;
 class QTableWidget;
 class QTabWidget;
 class QTextEdit;
+class QProcess;
 class QTimer;
 
 namespace monitor_hub {
@@ -48,7 +50,12 @@ private:
     void render_task_detail();
     void render_event_timeline();
     void render_takeovers();
+    void render_takeover_stream();
     void render_results();
+    void render_project_qa();
+    void run_project_live_query(bool ask_after = false);
+    void ask_project();
+    void start_project_question(const QString& live_context = {});
 
     const json::object* current_project() const;
     const json::object* current_snapshot() const;
@@ -131,7 +138,17 @@ private:
     QTableWidget* event_timeline_ = nullptr;
 
     QTableWidget* takeovers_ = nullptr;
+    QTextEdit* takeover_stream_ = nullptr;
     QTableWidget* results_ = nullptr;
+
+    QLabel* qa_status_ = nullptr;
+    QTextEdit* qa_history_ = nullptr;
+    QTextEdit* qa_input_ = nullptr;
+    QPushButton* qa_live_ = nullptr;
+    QPushButton* qa_send_ = nullptr;
+    QProcess* qa_process_ = nullptr;
+    QString qa_live_cache_;
+
     QTimer* timer_ = nullptr;
 };
 
