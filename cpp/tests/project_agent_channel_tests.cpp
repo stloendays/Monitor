@@ -26,7 +26,6 @@ int main() {
 
     ProjectAgentBinding binding;
     binding.provider = "claude_code";
-    binding.agent_id = "originating-agent";
     binding.session_id = "session-123";
     binding.session_name = "Alpha research";
     binding.workspace = "C:/Research/Alpha";
@@ -50,6 +49,7 @@ int main() {
     auto channel = load_project_agent_channel(paths, "alpha");
     assert(channel.binding);
     assert(channel.binding->session_id == "session-123");
+    assert(channel.binding->agent_id == "project-agent:alpha");
     assert(channel.messages.size() == 1);
 
     auto pending = pending_project_agent_questions(channel);
