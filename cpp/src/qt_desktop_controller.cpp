@@ -306,7 +306,10 @@ void QtDesktopController::show_settings_dialog() {
     auto* registry_row = new QHBoxLayout();
     auto* registry_path = new QLineEdit(&dialog);
     registry_path->setPlaceholderText(QStringLiteral("monitor_hub_projects.json 路径"));
-    registry_path->setText(current.registry_path);
+    registry_path->setText(
+        current.registry_path.isEmpty()
+            ? q(window_->runtime_paths().registry.string())
+            : current.registry_path);
     auto* choose_registry = new QPushButton(QStringLiteral("选择登记表…"), &dialog);
     registry_row->addWidget(registry_path, 1);
     registry_row->addWidget(choose_registry);
@@ -323,7 +326,10 @@ void QtDesktopController::show_settings_dialog() {
     auto* hub_data_row = new QHBoxLayout();
     auto* hub_data_path = new QLineEdit(&dialog);
     hub_data_path->setPlaceholderText(QStringLiteral("%LOCALAPPDATA%\\Monitor Hub"));
-    hub_data_path->setText(current.hub_data_path);
+    hub_data_path->setText(
+        current.hub_data_path.isEmpty()
+            ? q(window_->runtime_paths().hub_data.string())
+            : current.hub_data_path);
     auto* choose_hub_data = new QPushButton(QStringLiteral("选择 Hub 数据目录…"), &dialog);
     hub_data_row->addWidget(hub_data_path, 1);
     hub_data_row->addWidget(choose_hub_data);
