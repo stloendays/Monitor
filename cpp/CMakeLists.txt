@@ -74,6 +74,7 @@ if(MONITOR_HUB_BUILD_QT)
         src/qt_main_window.cpp
         src/qt_desktop_controller.cpp
         src/qt_desktop_settings.cpp
+        src/qt_app_logger.cpp
     )
     qt_add_resources(monitor_hub_qt monitor_hub_resources
         PREFIX "/monitor_hub"
@@ -110,6 +111,37 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    if(MONITOR_HUB_BUILD_QT)
+        add_executable(
+            monitor_hub_qt_desktop_settings_tests
+            tests/qt_desktop_settings_tests.cpp
+            src/qt_desktop_settings.cpp
+        )
+        target_include_directories(
+            monitor_hub_qt_desktop_settings_tests
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+        )
+        target_link_libraries(
+            monitor_hub_qt_desktop_settings_tests
+            PRIVATE Qt6::Core
+        )
+        add_test(
+            NAME monitor_hub_qt_desktop_settings_tests
+            COMMAND monitor_hub_qt_desktop_settings_tests
+        )
+        if(MSVC)
+            target_compile_options(
+                monitor_hub_qt_desktop_settings_tests
+                PRIVATE /W4 /permissive- /utf-8
+            )
+        else()
+            target_compile_options(
+                monitor_hub_qt_desktop_settings_tests
+                PRIVATE -Wall -Wextra -Wpedantic
+            )
+        endif()
+    endif()
+
     add_executable(monitor_hub_core_tests tests/core_tests.cpp)
     target_link_libraries(monitor_hub_core_tests PRIVATE monitor_hub_core)
     add_test(NAME monitor_hub_core_tests COMMAND monitor_hub_core_tests)
