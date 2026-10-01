@@ -1,6 +1,7 @@
 #include "monitor_hub/qt_search.hpp"
 
 #include <QRegularExpression>
+#include <QStringList>
 
 #include <algorithm>
 #include <utility>
