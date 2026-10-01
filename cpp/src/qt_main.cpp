@@ -1,6 +1,7 @@
 #include "monitor_hub/qt_desktop_controller.hpp"
 #include "monitor_hub/qt_desktop_settings.hpp"
 #include "monitor_hub/qt_main_window.hpp"
+#include "monitor_hub/qt_app_logger.hpp"
 
 #include <QApplication>
 #include <QFile>
@@ -9,6 +10,7 @@
 #include <QFont>
 #include <QIcon>
 #include <QMessageBox>
+#include <QDebug>
 
 #include <cstdlib>
 #include <filesystem>
@@ -21,6 +23,22 @@ int main(int argc, char** argv) {
     QApplication::setApplicationDisplayName("Monitor Hub");
     QApplication::setOrganizationName("Monitor");
     QApplication::setApplicationVersion(QStringLiteral(MONITOR_HUB_VERSION));
+
+    QString logging_error;
+    if (!monitor_hub::initialize_desktop_logging(&logging_error)) {
+        std::cerr << "warning: desktop logging unavailable: "
+                  << logging_error.toStdString() << "\n";
+    } else {
+        qInfo().noquote()
+            << "Monitor Hub desktop starting, version"
+            << QCoreApplication::applicationVersion();
+        QObject::connect(
+            &app,
+            &QCoreApplication::aboutToQuit,
+            &app,
+            [] { monitor_hub::shutdown_desktop_logging(); });
+    }
+
     QApplication::setWindowIcon(
         QIcon(QStringLiteral(":/monitor_hub/icons/monitor_hub.png")));
 
