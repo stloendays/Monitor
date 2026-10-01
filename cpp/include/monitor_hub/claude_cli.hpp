@@ -15,6 +15,11 @@ struct ClaudeUsageWindow {
     std::optional<double> resets_at;
 };
 
+struct ClaudeQuestionInvocation {
+    std::vector<std::string> arguments;
+    std::string stdin_payload;
+};
+
 struct ClaudeCliStatus {
     bool cli_found = false;
     int running_processes = 0;
@@ -49,6 +54,11 @@ struct ClaudeCliStatus {
     ClaudeUsageWindow seven_day;
     bool rate_limits_available = false;
 };
+
+ClaudeQuestionInvocation build_claude_read_only_question_invocation(
+    const std::string& prompt,
+    const std::string& system_prompt,
+    const std::string& model = "opus");
 
 ClaudeCliStatus load_claude_cli_status(
     const SystemInfo& system,
