@@ -21,6 +21,7 @@
 #include <QPixmap>
 #include <QProgressBar>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTableWidget>
@@ -1153,6 +1154,53 @@ void QtMainWindow::build_ui() {
         if (item) open_local(item->data(Qt::UserRole).toString().toUtf8().toStdString());
     });
     tabs_->addTab(result_tab, QStringLiteral("最终结果"));
+
+    auto* qa_tab = new QWidget(tabs_);
+    auto* qa_layout = new QVBoxLayout(qa_tab);
+    auto* qa_head = new QHBoxLayout();
+    auto* qa_label = new QLabel(QStringLiteral("项目提问"), qa_tab);
+    qa_label->setObjectName(QStringLiteral("sectionLabel"));
+    qa_head->addWidget(qa_label);
+    qa_status_ = new QLabel(QStringLiteral("只读问答"), qa_tab);
+    qa_status_->setObjectName(QStringLiteral("mutedText"));
+    qa_head->addWidget(qa_status_);
+    qa_head->addStretch();
+    qa_head->addWidget(info_button(
+        QStringLiteral(
+            "提问使用项目登记的 qa_cwd / qa_sources / claude_config_dir。"
+            "Claude 只获得 Read、Grep、Glob 工具；禁止 Bash、Edit、Write 和 NotebookEdit。"
+            "如果项目登记了 live_query，会先读取实时状态再附到问题上下文。"),
+        qa_tab));
+    qa_layout->addLayout(qa_head);
+
+    qa_history_ = new QTextEdit(qa_tab);
+    qa_history_->setReadOnly(true);
+    qa_history_->setPlaceholderText(
+        QStringLiteral("这里显示当前项目的只读问答结果。切换项目后不会把答案带到其他项目。"));
+    qa_layout->addWidget(qa_history_, 1);
+
+    qa_input_ = new QTextEdit(qa_tab);
+    qa_input_->setPlaceholderText(
+        QStringLiteral("例如：现在跑到哪一步？哪个任务有问题？最近一次 takeover 做了什么？"));
+    qa_input_->setMaximumHeight(110);
+    qa_layout->addWidget(qa_input_);
+
+    auto* qa_actions = new QHBoxLayout();
+    qa_live_ = new QPushButton(QStringLiteral("刷新实时状态"), qa_tab);
+    qa_send_ = new QPushButton(QStringLiteral("发送问题"), qa_tab);
+    qa_actions->addWidget(qa_live_);
+    qa_actions->addStretch();
+    qa_actions->addWidget(qa_send_);
+    qa_layout->addLayout(qa_actions);
+
+    connect(qa_live_, &QPushButton::clicked, this, [this] {
+        run_project_live_query(false);
+    });
+    connect(qa_send_, &QPushButton::clicked, this, [this] {
+        ask_project();
+    });
+    tabs_->addTab(qa_tab, QStringLiteral("提问"));
+
     connect(tabs_, &QTabWidget::currentChanged, this, [this](int) {
         render_context_header();
     });
@@ -1668,6 +1716,7 @@ void QtMainWindow::render_project() {
     render_event_timeline();
     render_takeovers();
     render_results();
+    render_project_qa();
     render_context_header();
 }
 
@@ -1737,6 +1786,234 @@ void QtMainWindow::render_task_detail() {
     open_result_->setEnabled(meta && local_exists(s(meta->if_contains("result"))));
     copy_command_->setEnabled(meta && !s(meta->if_contains("command")).empty());
     refresh_quick_actions();
+}
+
+
+void QtMainWindow::render_project_qa() {
+    const auto* project = current_project();
+    const bool available = project && !s(project->if_contains("builtin")).size();
+    const auto has_project = project != nullptr;
+    const auto* live = project ? object(project->if_contains("live_query")) : nullptr;
+    const bool has_live = live && array(live->if_contains("cmd")) &&
+                          !array(live->if_contains("cmd"))->empty();
+
+    if (qa_live_) qa_live_->setEnabled(has_project && has_live && !qa_process_);
+    if (qa_send_) qa_send_->setEnabled(has_project && !qa_process_);
+    if (qa_input_) qa_input_->setEnabled(has_project && !qa_process_);
+    if (!qa_status_) return;
+
+    if (!has_project) {
+        qa_status_->setText(QStringLiteral("未选择项目"));
+        return;
+    }
+    if (qa_process_) {
+        qa_status_->setText(QStringLiteral("正在查询…"));
+        return;
+    }
+    const auto sources = array(project->if_contains("qa_sources"));
+    qa_status_->setText(
+        sources && !sources->empty()
+            ? QStringLiteral("只读问答 · 已登记 %1 个来源").arg(sources->size())
+            : QStringLiteral("只读问答 · 使用项目目录"));
+}
+
+void QtMainWindow::run_project_live_query(bool ask_after) {
+    const auto* project = current_project();
+    if (!project || qa_process_) return;
+    const auto* live = object(project->if_contains("live_query"));
+    const auto* cmd = live ? array(live->if_contains("cmd")) : nullptr;
+    if (!cmd || cmd->empty()) {
+        if (ask_after) start_project_question({});
+        else if (qa_status_) qa_status_->setText(QStringLiteral("这个项目没有登记 live_query"));
+        return;
+    }
+
+    QStringList parts;
+    for (const auto& item : *cmd) parts << q(s(&item));
+    if (parts.isEmpty() || parts.front().trimmed().isEmpty()) {
+        if (ask_after) start_project_question({});
+        return;
+    }
+
+    qa_process_ = new QProcess(this);
+    qa_process_->setProcessChannelMode(QProcess::MergedChannels);
+    qa_process_->setProgram(parts.takeFirst());
+    qa_process_->setArguments(parts);
+    const auto cwd = s(project->if_contains("qa_cwd"), s(project->if_contains("dir")));
+    if (!cwd.empty()) qa_process_->setWorkingDirectory(q(cwd));
+    if (qa_live_) qa_live_->setEnabled(false);
+    if (qa_send_) qa_send_->setEnabled(false);
+    if (qa_status_) qa_status_->setText(QStringLiteral("正在读取实时状态…"));
+
+    auto* process = qa_process_;
+    connect(process, &QProcess::errorOccurred, this,
+        [this, process, ask_after](QProcess::ProcessError error) {
+            if (process != qa_process_ || error != QProcess::FailedToStart) return;
+            const auto message = QStringLiteral("实时查询启动失败：%1").arg(process->errorString());
+            if (qa_history_) qa_history_->append(message);
+            qa_process_ = nullptr;
+            process->deleteLater();
+            render_project_qa();
+            if (ask_after) start_project_question(message);
+        });
+    connect(process, qOverload<int,QProcess::ExitStatus>(&QProcess::finished), this,
+        [this, process, ask_after](int exit_code, QProcess::ExitStatus exit_status) {
+            if (process != qa_process_) return;
+            auto output = QString::fromUtf8(process->readAll()).trimmed();
+            if (output.size() > 16000) output = output.right(16000);
+            if (exit_status != QProcess::NormalExit || exit_code != 0) {
+                output = QStringLiteral("实时查询失败（exit %1）：\n%2").arg(exit_code).arg(output);
+            }
+            qa_live_cache_ = output;
+            if (qa_history_ && !output.isEmpty()) {
+                qa_history_->append(QStringLiteral("[实时状态]\n%1").arg(output));
+            }
+            qa_process_ = nullptr;
+            process->deleteLater();
+            render_project_qa();
+            if (ask_after) start_project_question(output);
+        });
+    process->start();
+}
+
+void QtMainWindow::ask_project() {
+    if (!qa_input_ || qa_process_) return;
+    const auto question = qa_input_->toPlainText().trimmed();
+    if (question.isEmpty()) return;
+    if (qa_history_) qa_history_->append(QStringLiteral("你：%1").arg(question));
+    qa_input_->clear();
+
+    const auto* project = current_project();
+    const auto* live = project ? object(project->if_contains("live_query")) : nullptr;
+    if (live && array(live->if_contains("cmd")) && !array(live->if_contains("cmd"))->empty())
+        run_project_live_query(true);
+    else
+        start_project_question({});
+}
+
+void QtMainWindow::start_project_question(const QString& live_context) {
+    const auto* project = current_project();
+    const auto* snap = current_snapshot();
+    if (!project || !snap || qa_process_ || !qa_history_) return;
+
+    QString question;
+    const auto blocks = qa_history_->toPlainText().split(QStringLiteral("\n"));
+    for (auto it = blocks.crbegin(); it != blocks.crend(); ++it) {
+        if (it->startsWith(QStringLiteral("你："))) {
+            question = it->mid(2).trimmed();
+            break;
+        }
+    }
+    if (question.isEmpty()) return;
+
+    const auto claude = load_claude_cli_status(system_, paths_);
+    if (!claude.cli_found || claude.executable.empty()) {
+        qa_history_->append(QStringLiteral("Monitor Hub：未找到 Claude CLI。"));
+        if (qa_status_) qa_status_->setText(QStringLiteral("Claude CLI 不可用"));
+        return;
+    }
+
+    QStringList source_items;
+    if (const auto* sources = array(project->if_contains("qa_sources"))) {
+        for (const auto& item : *sources) source_items << q(s(&item));
+    }
+    if (source_items.isEmpty()) {
+        const auto dir = s(project->if_contains("dir"));
+        if (!dir.empty()) source_items << q(dir);
+    }
+
+    const auto project_name = q(s(project->if_contains("name")));
+    const auto system_prompt = QStringLiteral(
+        "You answer the user's questions about the monitored project \"%1\" and its monitor takeovers. "
+        "Answer in Chinese, lead with the answer, keep it short and concrete. "
+        "You can only read files with Read, Grep and Glob. Do not modify files, start/stop jobs, submit, commit or push. "
+        "If an action is needed, state exactly what should be done and let the user decide. Sources: %2")
+        .arg(project_name, source_items.join(QStringLiteral("; ")));
+
+    QStringList context;
+    context << QStringLiteral("[Monitor Hub current view]")
+            << QStringLiteral("状态：%1").arg(q(s(snap->if_contains("health"))))
+            << QStringLiteral("摘要：%1").arg(q(s(snap->if_contains("summary"))))
+            << QStringLiteral("问题：%1").arg(q(s(snap->if_contains("problem"), s(snap->if_contains("headline")))));
+    if (!live_context.trimmed().isEmpty()) {
+        context << QStringLiteral("")
+                << QStringLiteral("[Live query]")
+                << live_context;
+    }
+    context << QStringLiteral("")
+            << QStringLiteral("[User question]")
+            << question;
+
+    QStringList args{
+        QStringLiteral("-p"),
+        QStringLiteral("--output-format"), QStringLiteral("stream-json"),
+        QStringLiteral("--verbose"),
+        QStringLiteral("--model"), QStringLiteral("opus"),
+        QStringLiteral("--permission-mode"), QStringLiteral("default"),
+        QStringLiteral("--setting-sources"), QStringLiteral("project"),
+        QStringLiteral("--strict-mcp-config"),
+        QStringLiteral("--tools"), QStringLiteral("Read,Grep,Glob"),
+        QStringLiteral("--disallowedTools"), QStringLiteral("Bash,Edit,Write,NotebookEdit"),
+        QStringLiteral("--append-system-prompt"), system_prompt,
+        QStringLiteral("--allowedTools"),
+        QStringLiteral("Read"), QStringLiteral("Grep"), QStringLiteral("Glob"),
+        context.join(QStringLiteral("\n"))
+    };
+
+    qa_process_ = new QProcess(this);
+    qa_process_->setProcessChannelMode(QProcess::MergedChannels);
+    qa_process_->setProgram(q(claude.executable.string()));
+    qa_process_->setArguments(args);
+    const auto cwd = s(project->if_contains("qa_cwd"), s(project->if_contains("dir")));
+    if (!cwd.empty()) qa_process_->setWorkingDirectory(q(cwd));
+
+    auto env = QProcessEnvironment::systemEnvironment();
+    env.remove(QStringLiteral("CLAUDE_CONFIG_DIR"));
+    const auto config = s(project->if_contains("claude_config_dir"));
+    if (!config.empty()) env.insert(QStringLiteral("CLAUDE_CONFIG_DIR"), q(config));
+    qa_process_->setProcessEnvironment(env);
+
+    if (qa_live_) qa_live_->setEnabled(false);
+    if (qa_send_) qa_send_->setEnabled(false);
+    if (qa_input_) qa_input_->setEnabled(false);
+    if (qa_status_) qa_status_->setText(QStringLiteral("Claude 正在只读分析…"));
+
+    auto* process = qa_process_;
+    connect(process, &QProcess::errorOccurred, this,
+        [this, process](QProcess::ProcessError error) {
+            if (process != qa_process_ || error != QProcess::FailedToStart) return;
+            qa_history_->append(QStringLiteral("Monitor Hub：Claude 启动失败：%1").arg(process->errorString()));
+            qa_process_ = nullptr;
+            process->deleteLater();
+            render_project_qa();
+        });
+    connect(process, qOverload<int,QProcess::ExitStatus>(&QProcess::finished), this,
+        [this, process](int exit_code, QProcess::ExitStatus exit_status) {
+            if (process != qa_process_) return;
+            const auto raw = QString::fromUtf8(process->readAll());
+            QString answer;
+            const auto lines = raw.split(QLatin1Char('\n'));
+            for (const auto& line : lines) {
+                boost::system::error_code error;
+                const auto parsed = json::parse(line.toUtf8().toStdString(), error);
+                if (error || !parsed.is_object()) continue;
+                const auto& obj = parsed.as_object();
+                if (s(obj.if_contains("type")) != "result") continue;
+                answer = q(s(obj.if_contains("result")));
+            }
+            if (answer.trimmed().isEmpty()) {
+                answer = exit_status == QProcess::NormalExit && exit_code == 0
+                    ? raw.trimmed().right(6000)
+                    : QStringLiteral("Claude 问答失败（exit %1）：\n%2")
+                          .arg(exit_code)
+                          .arg(raw.trimmed().right(3000));
+            }
+            qa_history_->append(QStringLiteral("Claude：%1").arg(answer));
+            qa_process_ = nullptr;
+            process->deleteLater();
+            render_project_qa();
+        });
+    process->start();
 }
 
 void QtMainWindow::open_new_monitor_dialog() {
