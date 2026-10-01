@@ -10,6 +10,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QFileDialog>
 #include <QCryptographicHash>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -18,6 +19,7 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QLabel>
+#include <QLineEdit>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QMenu>
@@ -27,6 +29,7 @@
 #include <QSystemTrayIcon>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 
 namespace monitor_hub {
 namespace {
@@ -291,6 +294,47 @@ void QtDesktopController::show_settings_dialog() {
             "L3 决策仍必须交给你或主 Agent。"));
     layout->addWidget(automatic_control);
 
+    auto* runtime_label = new QLabel(
+        QStringLiteral(
+            "数据位置（修改后下次启动生效）\n"
+            "环境变量 MONITOR_HUB_REGISTRY / MONITOR_HUB_DATA 的优先级高于这里。"),
+        &dialog);
+    runtime_label->setWordWrap(true);
+    layout->addWidget(runtime_label);
+
+    auto* registry_row = new QHBoxLayout();
+    auto* registry_path = new QLineEdit(&dialog);
+    registry_path->setPlaceholderText(QStringLiteral("monitor_hub_projects.json 路径"));
+    registry_path->setText(current.registry_path);
+    auto* choose_registry = new QPushButton(QStringLiteral("选择登记表…"), &dialog);
+    registry_row->addWidget(registry_path, 1);
+    registry_row->addWidget(choose_registry);
+    layout->addLayout(registry_row);
+    connect(choose_registry, &QPushButton::clicked, &dialog, [&dialog, registry_path] {
+        const auto chosen = QFileDialog::getOpenFileName(
+            &dialog,
+            QStringLiteral("选择 monitor_hub_projects.json"),
+            QFileInfo(registry_path->text()).absolutePath(),
+            QStringLiteral("JSON (*.json);;All files (*)"));
+        if (!chosen.isEmpty()) registry_path->setText(chosen);
+    });
+
+    auto* hub_data_row = new QHBoxLayout();
+    auto* hub_data_path = new QLineEdit(&dialog);
+    hub_data_path->setPlaceholderText(QStringLiteral("%LOCALAPPDATA%\\Monitor Hub"));
+    hub_data_path->setText(current.hub_data_path);
+    auto* choose_hub_data = new QPushButton(QStringLiteral("选择 Hub 数据目录…"), &dialog);
+    hub_data_row->addWidget(hub_data_path, 1);
+    hub_data_row->addWidget(choose_hub_data);
+    layout->addLayout(hub_data_row);
+    connect(choose_hub_data, &QPushButton::clicked, &dialog, [&dialog, hub_data_path] {
+        const auto chosen = QFileDialog::getExistingDirectory(
+            &dialog,
+            QStringLiteral("选择 Monitor Hub 数据目录"),
+            hub_data_path->text());
+        if (!chosen.isEmpty()) hub_data_path->setText(chosen);
+    });
+
     auto* launch_at_login =
         new QCheckBox(QStringLiteral("登录 Windows 时自动启动 Monitor Hub"), &dialog);
     launch_at_login->setChecked(current.launch_at_login);
@@ -335,6 +379,17 @@ void QtDesktopController::show_settings_dialog() {
             window_,
             QStringLiteral("Monitor Hub"),
             QStringLiteral("保存桌面设置失败：%1").arg(error));
+    }
+
+    QString runtime_error;
+    if (!save_runtime_locations(
+            registry_path->text(),
+            hub_data_path->text(),
+            &runtime_error)) {
+        QMessageBox::warning(
+            window_,
+            QStringLiteral("Monitor Hub"),
+            QStringLiteral("保存数据位置失败：%1").arg(runtime_error));
     }
 
     if (launch_at_login->isEnabled() &&
