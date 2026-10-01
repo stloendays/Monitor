@@ -2071,6 +2071,10 @@ void QtMainWindow::run_project_live_query(bool ask_after) {
     if (qa_status_) qa_status_->setText(QStringLiteral("正在读取实时状态…"));
 
     auto* process = qa_process_;
+    connect(process, &QProcess::started, this, [process, stdin_payload] {
+        process->write(stdin_payload);
+        process->closeWriteChannel();
+    });
     connect(process, &QProcess::errorOccurred, this,
         [this, process, ask_after](QProcess::ProcessError error) {
             if (process != qa_process_ || error != QProcess::FailedToStart) return;
@@ -2169,21 +2173,17 @@ void QtMainWindow::start_project_question(const QString& live_context) {
             << QStringLiteral("[User question]")
             << question;
 
-    QStringList args{
-        QStringLiteral("-p"),
-        QStringLiteral("--output-format"), QStringLiteral("stream-json"),
-        QStringLiteral("--verbose"),
-        QStringLiteral("--model"), QStringLiteral("opus"),
-        QStringLiteral("--permission-mode"), QStringLiteral("default"),
-        QStringLiteral("--setting-sources"), QStringLiteral("project"),
-        QStringLiteral("--strict-mcp-config"),
-        QStringLiteral("--tools"), QStringLiteral("Read,Grep,Glob"),
-        QStringLiteral("--disallowedTools"), QStringLiteral("Bash,Edit,Write,NotebookEdit"),
-        QStringLiteral("--append-system-prompt"), system_prompt,
-        QStringLiteral("--allowedTools"),
-        QStringLiteral("Read"), QStringLiteral("Grep"), QStringLiteral("Glob"),
-        context.join(QStringLiteral("\n"))
-    };
+    const auto invocation =
+        build_claude_read_only_question_invocation(
+            context.join(QStringLiteral("\n")).toUtf8().toStdString(),
+            system_prompt.toUtf8().toStdString());
+
+    QStringList args;
+    args.reserve(static_cast<qsizetype>(invocation.arguments.size()));
+    for (const auto& argument : invocation.arguments)
+        args << q(argument);
+    const auto stdin_payload =
+        QByteArray::fromStdString(invocation.stdin_payload);
 
     qa_process_ = new QProcess(this);
     qa_process_->setProcessChannelMode(QProcess::MergedChannels);
