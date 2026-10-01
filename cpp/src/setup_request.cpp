@@ -282,6 +282,8 @@ SetupRequestLaunch prepare_setup_request(
         fs::path(launch.request_file.string() + ".tmp");
     const auto prompt_tmp =
         fs::path(launch.prompt_file.string() + ".tmp");
+    const auto origin_tmp =
+        fs::path(launch.origin_agent_file.string() + ".tmp");
 
     const auto submitted_at = local_time_text(time_value);
     const auto prompt = setup_prompt(
@@ -296,8 +298,6 @@ SetupRequestLaunch prepare_setup_request(
     try {
         write_utf8(request_tmp, body + "\n");
         write_utf8(prompt_tmp, prompt);
-        fs::rename(request_tmp, launch.request_file);
-        fs::rename(prompt_tmp, launch.prompt_file);
 
         if (origin_agent && !origin_agent->empty()) {
             auto binding = *origin_agent;
@@ -305,15 +305,24 @@ SetupRequestLaunch prepare_setup_request(
             if (binding.bound_at.empty())
                 binding.bound_at = submitted_at;
             write_utf8(
-                launch.origin_agent_file,
+                origin_tmp,
                 json::serialize(
                     project_agent_binding_to_json(binding)) +
                     "\n");
         }
+
+        fs::rename(request_tmp, launch.request_file);
+        fs::rename(prompt_tmp, launch.prompt_file);
+        if (origin_agent && !origin_agent->empty())
+            fs::rename(origin_tmp, launch.origin_agent_file);
     } catch (...) {
         std::error_code cleanup;
         fs::remove(request_tmp, cleanup);
         fs::remove(prompt_tmp, cleanup);
+        fs::remove(origin_tmp, cleanup);
+        fs::remove(launch.request_file, cleanup);
+        fs::remove(launch.prompt_file, cleanup);
+        fs::remove(launch.origin_agent_file, cleanup);
         throw;
     }
 
