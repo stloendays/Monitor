@@ -1,0 +1,22 @@
+{
+  "name": "monitor-hub-mcp",
+  "version": "0.1.0",
+  "description": "MCP bridge for Monitor Hub project/task state and policy-bounded control.",
+  "type": "module",
+  "bin": {
+    "monitor-hub-mcp": "src/index.mjs"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.2.0",
+    "zod": "4.6.5"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
