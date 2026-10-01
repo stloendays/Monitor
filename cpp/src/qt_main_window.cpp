@@ -1058,7 +1058,11 @@ void QtMainWindow::build_ui() {
     split->setStretchFactor(1, 1);
     progress_layout->addWidget(split, 1);
 
-    connect(progress_, &QTableWidget::itemSelectionChanged, this, [this] { render_task_detail(); });
+    connect(progress_, &QTableWidget::itemSelectionChanged, this, [this] {
+        render_task_detail();
+        if (event_current_task_ && event_current_task_->isChecked())
+            render_event_timeline();
+    });
     connect(progress_, &QTableWidget::cellDoubleClicked, this, [this](int, int) { open_task_target(); });
     connect(open_task_, &QPushButton::clicked, this, [this] { open_task_target(); });
     connect(open_log_, &QPushButton::clicked, this, [this] { open_task_target("log"); });
@@ -1705,6 +1709,7 @@ void QtMainWindow::refresh_quick_actions() {
     if (quick_job_root_) quick_job_root_->setEnabled(local_exists(paths_.job_root.string()));
     if (quick_copy_command_) quick_copy_command_->setEnabled(!command.empty());
     if (quick_copy_debug_) quick_copy_debug_->setEnabled(project != nullptr);
+    if (quick_recent_) quick_recent_->setEnabled(!load_recent_paths().isEmpty());
 }
 
 void QtMainWindow::render_overview() {
@@ -1816,6 +1821,28 @@ void QtMainWindow::render_sidebar() {
     }
     if (selected_row >= 0) project_list_->setCurrentRow(selected_row);
     project_list_->blockSignals(false);
+    filter_sidebar_projects();
+}
+
+void QtMainWindow::filter_sidebar_projects() {
+    if (!project_list_) return;
+    const auto query =
+        global_search_ ? global_search_->text().trimmed().toCaseFolded()
+                       : QString{};
+    for (int row = 0; row < project_list_->count(); ++row) {
+        auto* item = project_list_->item(row);
+        if (!item) continue;
+        if (query.isEmpty()) {
+            item->setHidden(false);
+            continue;
+        }
+        const auto haystack =
+            (item->text() + QLatin1Char(' ') +
+             item->toolTip() + QLatin1Char(' ') +
+             item->data(Qt::UserRole).toString())
+                .toCaseFolded();
+        item->setHidden(!haystack.contains(query));
+    }
 }
 
 const json::object* QtMainWindow::current_project() const {
@@ -2224,7 +2251,7 @@ void QtMainWindow::start_project_question(const QString& live_context) {
     process->start();
 }
 
-void QtMainWindow::open_new_monitor_dialog() {
+void QtMainWindow::open_new_monitor_dialog(const QString& prefilled_workdir) {
     auto* dialog = new QDialog(this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setWindowTitle(QStringLiteral("新建监控任务"));
@@ -2247,7 +2274,23 @@ void QtMainWindow::open_new_monitor_dialog() {
     layout->addWidget(help);
 
     auto* editor = new QTextEdit(dialog);
-    editor->setPlainText(q(setup_request_template()));
+    auto initial_request = q(setup_request_template());
+    if (!prefilled_workdir.trimmed().isEmpty()) {
+        const auto clean =
+            QDir::toNativeSeparators(
+                QDir::cleanPath(prefilled_workdir));
+        auto project_name = QFileInfo(clean).fileName();
+        if (project_name.isEmpty())
+            project_name = QStringLiteral("新监控项目");
+        initial_request.replace(
+            QStringLiteral("项目名称：\n"),
+            QStringLiteral("项目名称：%1\n").arg(project_name));
+        initial_request.replace(
+            QStringLiteral("项目目录（本机路径）：\n"),
+            QStringLiteral("项目目录（本机路径）：%1\n").arg(clean));
+        remember_recent_path(clean);
+    }
+    editor->setPlainText(initial_request);
     editor->setAcceptRichText(false);
     layout->addWidget(editor, 1);
 
@@ -2651,13 +2694,72 @@ void QtMainWindow::render_event_timeline() {
         if (stage == "needs_user") ++waiting_decision;
     }
 
+    if (event_current_task_)
+        event_current_task_->setEnabled(!selected_task_id_.empty());
+
+    const auto kind_prefix =
+        event_kind_filter_
+            ? event_kind_filter_->currentData().toString()
+            : QString{};
+    const auto filter_text =
+        event_filter_
+            ? event_filter_->text().trimmed().toCaseFolded()
+            : QString{};
+    const auto filter_tokens =
+        filter_text.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    const bool current_task_only =
+        event_current_task_ &&
+        event_current_task_->isChecked() &&
+        !selected_task_id_.empty();
+
+    std::vector<const EventRecord*> visible_events;
+    visible_events.reserve(projection.events.size());
+    for (auto it = projection.events.rbegin();
+         it != projection.events.rend();
+         ++it) {
+        const auto& event = *it;
+        if (!kind_prefix.isEmpty() &&
+            !q(event.event_type).startsWith(kind_prefix)) {
+            continue;
+        }
+        if (current_task_only &&
+            event.task_id != selected_task_id_) {
+            continue;
+        }
+
+        QStringList searchable;
+        searchable
+            << q(event.event_type)
+            << q(event_display_name(event.event_type))
+            << q(event.task_id)
+            << q(event.issue_id)
+            << q(event.source_kind)
+            << q(event.source_id)
+            << q(event.summary)
+            << q(event.authority);
+        for (const auto& ref : event.evidence_refs)
+            searchable << q(ref);
+        const auto haystack =
+            searchable.join(QLatin1Char(' ')).toCaseFolded();
+
+        bool matches = true;
+        for (const auto& token : filter_tokens) {
+            if (!haystack.contains(token)) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) visible_events.push_back(&event);
+    }
+
     event_status_->setText(
         QStringLiteral(
-            "未解决 %1 · 等待恢复验证 %2 · 等待决策 %3 · 协议事件 %4")
+            "未解决 %1 · 等待恢复验证 %2 · 等待决策 %3 · 协议事件 %4 · 当前显示 %5")
             .arg(static_cast<qulonglong>(unresolved))
             .arg(static_cast<qulonglong>(waiting_verification))
             .arg(static_cast<qulonglong>(waiting_decision))
-            .arg(static_cast<qulonglong>(projection.events.size())));
+            .arg(static_cast<qulonglong>(projection.events.size()))
+            .arg(static_cast<qulonglong>(visible_events.size())));
 
     QStringList diagnostics;
     diagnostics
@@ -2756,7 +2858,9 @@ void QtMainWindow::render_event_timeline() {
             issue.task_id.empty() ? QStringLiteral("—") : q(issue.task_id));
         task->setData(Qt::UserRole, q(issue.task_id));
         issues_->setItem(row, 0, task);
-        issues_->setItem(row, 1, new QTableWidgetItem(q(issue.issue_id)));
+        auto* issue_item = new QTableWidgetItem(q(issue.issue_id));
+        issue_item->setData(Qt::UserRole, q(issue.issue_id));
+        issues_->setItem(row, 1, issue_item);
 
         auto* state = new QTableWidgetItem(
             q(issue_state_display_name(issue.state)));
@@ -2791,23 +2895,50 @@ void QtMainWindow::render_event_timeline() {
     }
     issues_->resizeColumnsToContents();
 
-    event_timeline_->setRowCount(static_cast<int>(projection.events.size()));
-    for (int row = 0; row < static_cast<int>(projection.events.size()); ++row) {
+    event_timeline_->setRowCount(
+        static_cast<int>(visible_events.size()));
+    for (int row = 0;
+         row < static_cast<int>(visible_events.size());
+         ++row) {
         const auto& event =
-            projection.events[projection.events.size() - 1 -
-                              static_cast<std::size_t>(row)];
+            *visible_events[static_cast<std::size_t>(row)];
 
         event_timeline_->setItem(
-            row, 0, new QTableWidgetItem(q(short_time(event.occurred_at))));
+            row,
+            0,
+            new QTableWidgetItem(q(short_time(event.occurred_at))));
 
-        auto* type = new QTableWidgetItem(q(event_display_name(event.event_type)));
+        auto* type =
+            new QTableWidgetItem(q(event_display_name(event.event_type)));
+        type->setData(Qt::UserRole, q(event.event_id));
+        type->setData(Qt::UserRole + 1, q(event.task_id));
+        type->setData(Qt::UserRole + 2, q(event.issue_id));
+        if (!event.evidence_refs.empty()) {
+            const auto evidence = q(event.evidence_refs.front());
+            QString resolved_evidence = evidence;
+            if (!QFileInfo::exists(resolved_evidence)) {
+                if (const auto* project = current_project()) {
+                    const auto root = q(s(project->if_contains("dir")));
+                    if (!root.isEmpty()) {
+                        const auto candidate =
+                            QDir(root).filePath(evidence);
+                        if (QFileInfo::exists(candidate))
+                            resolved_evidence = candidate;
+                    }
+                }
+            }
+            if (QFileInfo::exists(resolved_evidence))
+                type->setData(Qt::UserRole + 3, resolved_evidence);
+        }
+
         if (event.event_type == "issue.user_action_required" ||
             event.event_type == "issue.escalated")
             emphasize_item(type, QColor(QStringLiteral("#9A641F")));
         else if (event.event_type == "issue.recovery_verified" ||
                  event.event_type == "issue.resolved")
             emphasize_item(type, QColor(QStringLiteral("#3F7D5A")));
-        else if (event.severity == "error" || event.severity == "critical" ||
+        else if (event.severity == "error" ||
+                 event.severity == "critical" ||
                  event.event_type == "agent.failed")
             emphasize_item(type, QColor(QStringLiteral("#A34747")));
         event_timeline_->setItem(row, 1, type);
@@ -2816,25 +2947,41 @@ void QtMainWindow::render_event_timeline() {
             row,
             2,
             new QTableWidgetItem(
-                event.task_id.empty() ? QStringLiteral("—") : q(event.task_id)));
+                event.task_id.empty()
+                    ? QStringLiteral("—")
+                    : q(event.task_id)));
+        event_timeline_->setItem(
+            row,
+            3,
+            new QTableWidgetItem(
+                event.issue_id.empty()
+                    ? QStringLiteral("—")
+                    : q(event.issue_id)));
 
         QString source = q(event.source_kind);
         if (!event.source_id.empty())
             source += QStringLiteral(" · ") + q(event.source_id);
-        event_timeline_->setItem(row, 3, new QTableWidgetItem(source));
+        event_timeline_->setItem(
+            row,
+            4,
+            new QTableWidgetItem(source));
 
         auto* summary = new QTableWidgetItem(
             event.summary.empty()
                 ? q(event_display_name(event.event_type))
                 : q(event.summary));
+        QStringList tooltip;
+        tooltip << QStringLiteral("event_id=%1").arg(q(event.event_id));
+        if (!event.correlation_id.empty())
+            tooltip << QStringLiteral("correlation=%1")
+                           .arg(q(event.correlation_id));
         if (!event.evidence_refs.empty()) {
-            QStringList evidence;
-            evidence << QStringLiteral("Evidence:");
+            tooltip << QStringLiteral("Evidence:");
             for (const auto& ref : event.evidence_refs)
-                evidence << QStringLiteral("• ") + q(ref);
-            summary->setToolTip(evidence.join(QStringLiteral("\n")));
+                tooltip << QStringLiteral("• ") + q(ref);
         }
-        event_timeline_->setItem(row, 4, summary);
+        summary->setToolTip(tooltip.join(QStringLiteral("\n")));
+        event_timeline_->setItem(row, 5, summary);
     }
     event_timeline_->resizeColumnsToContents();
 }
