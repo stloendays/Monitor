@@ -1,4 +1,5 @@
 #include "monitor_hub/qt_desktop_settings.hpp"
+#include "monitor_hub/qt_app_logger.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -203,6 +204,8 @@ QString desktop_diagnostics_text() {
           << QStringLiteral("executable=%1").arg(
                  QDir::toNativeSeparators(QCoreApplication::applicationFilePath()))
           << QStringLiteral("settings=%1").arg(desktop_settings_storage())
+          << QStringLiteral("log_file=%1").arg(
+                 QDir::toNativeSeparators(desktop_log_file()))
           << QStringLiteral("orchestrator=%1").arg(
                  QDir::toNativeSeparators(desktop_orchestrator_program()))
           << QStringLiteral("orchestrator_exists=%1").arg(
