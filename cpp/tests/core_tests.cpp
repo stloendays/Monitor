@@ -37,6 +37,37 @@ int main() {
     assert(iso_minutes("PT1H30M") == 90);
     assert(short_time("2026-09-28T21:45:00") == "09-28 21:45");
 
+    const auto qa_invocation =
+        build_claude_read_only_question_invocation(
+            "[Monitor Hub current view]\n[User question]\n你好",
+            "read-only system prompt",
+            "opus");
+    assert(!qa_invocation.arguments.empty());
+    assert(qa_invocation.arguments.front() == "-p");
+    assert(qa_invocation.stdin_payload ==
+           "[Monitor Hub current view]\n[User question]\n你好\n");
+    assert(std::find(
+               qa_invocation.arguments.begin(),
+               qa_invocation.arguments.end(),
+               qa_invocation.stdin_payload) ==
+           qa_invocation.arguments.end());
+    const auto allowed_tools = std::find(
+        qa_invocation.arguments.begin(),
+        qa_invocation.arguments.end(),
+        "--allowedTools");
+    assert(allowed_tools != qa_invocation.arguments.end());
+    assert(std::distance(allowed_tools, qa_invocation.arguments.end()) == 4);
+    assert(*(allowed_tools + 1) == "Read");
+    assert(*(allowed_tools + 2) == "Grep");
+    assert(*(allowed_tools + 3) == "Glob");
+    const auto system_prompt_arg = std::find(
+        qa_invocation.arguments.begin(),
+        qa_invocation.arguments.end(),
+        "--append-system-prompt");
+    assert(system_prompt_arg != qa_invocation.arguments.end());
+    assert(system_prompt_arg + 1 != qa_invocation.arguments.end());
+    assert(*(system_prompt_arg + 1) == "read-only system prompt");
+
     SystemInfo raw_probe_fixture;
     TaskInfo raw_task;
     raw_task.name = "demo__monitor__local__15m";
