@@ -5,6 +5,7 @@
 #include "monitor_hub/event_store.hpp"
 
 #include <QMainWindow>
+#include <QString>
 
 #include <map>
 #include <string>
