@@ -16,6 +16,7 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QDialog>
+#include <QDir>
 #include <QFontDatabase>
 #include <QFrame>
 #include <QHeaderView>
