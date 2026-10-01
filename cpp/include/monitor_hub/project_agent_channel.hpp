@@ -73,6 +73,10 @@ ProjectAgentMessage append_project_agent_message(
 std::vector<ProjectAgentMessage> pending_project_agent_questions(
     const ProjectAgentChannel& channel);
 
+std::optional<ProjectAgentBinding> project_agent_binding_from_json(
+    const json::value& value,
+    std::string* error = nullptr);
+
 json::object project_agent_binding_to_json(
     const ProjectAgentBinding& binding);
 json::object project_agent_message_to_json(
