@@ -123,6 +123,30 @@ fs::path local_fs_path(const QString& path) {
 #endif
 }
 
+QString normalized_compare_path(QString path) {
+    path = QDir::fromNativeSeparators(QDir::cleanPath(path.trimmed()));
+    while (path.size() > 1 && path.endsWith(QLatin1Char('/')))
+        path.chop(1);
+#ifdef Q_OS_WIN
+    return path.toLower();
+#else
+    return path;
+#endif
+}
+
+bool ui_paths_related(const QString& lhs, const QString& rhs) {
+    const auto a = normalized_compare_path(lhs);
+    const auto b = normalized_compare_path(rhs);
+    if (a.isEmpty() || b.isEmpty()) return false;
+    if (a == b) return true;
+    return (a.size() > b.size() &&
+            a.startsWith(b) &&
+            a.at(b.size()) == QLatin1Char('/')) ||
+           (b.size() > a.size() &&
+            b.startsWith(a) &&
+            b.at(a.size()) == QLatin1Char('/'));
+}
+
 void open_local(const QString& path) {
     const auto local = QDir::cleanPath(path);
     if (local.isEmpty() || !QFileInfo::exists(local)) return;
@@ -1325,25 +1349,25 @@ void QtMainWindow::build_ui() {
     auto* qa_tab = new QWidget(tabs_);
     auto* qa_layout = new QVBoxLayout(qa_tab);
     auto* qa_head = new QHBoxLayout();
-    auto* qa_label = new QLabel(QStringLiteral("项目提问"), qa_tab);
+    auto* qa_label = new QLabel(QStringLiteral("项目 Agent"), qa_tab);
     qa_label->setObjectName(QStringLiteral("sectionLabel"));
     qa_head->addWidget(qa_label);
-    qa_status_ = new QLabel(QStringLiteral("只读问答"), qa_tab);
+    qa_status_ = new QLabel(QStringLiteral("项目专属会话"), qa_tab);
     qa_status_->setObjectName(QStringLiteral("mutedText"));
     qa_head->addWidget(qa_status_);
     qa_head->addStretch();
     qa_head->addWidget(info_button(
         QStringLiteral(
-            "提问使用项目登记的 qa_cwd / qa_sources / claude_config_dir。"
-            "Claude 只获得 Read、Grep、Glob 工具；禁止 Bash、Edit、Write 和 NotebookEdit。"
-            "如果项目登记了 live_query，会先读取实时状态再附到问题上下文。"),
+            "这里不启动临时 headless 模型会话。问题会写入当前项目独立的 Agent Channel，"
+            "由发起该监控请求时绑定的 Agent/MCP 读取并回复。"
+            "如果项目登记了 live_query，Monitor Hub 会先做只读实时查询，并把结果作为同一问题的上下文。"),
         qa_tab));
     qa_layout->addLayout(qa_head);
 
     qa_history_ = new QTextEdit(qa_tab);
     qa_history_->setReadOnly(true);
     qa_history_->setPlaceholderText(
-        QStringLiteral("这里显示当前项目的只读问答结果。切换项目后不会把答案带到其他项目。"));
+        QStringLiteral("这里显示该监控项目自己的长期 Agent 会话：原监控请求、后续问题、回答和实时上下文都保存在一起。"));
     qa_layout->addWidget(qa_history_, 1);
 
     qa_input_ = new QTextEdit(qa_tab);
@@ -1354,7 +1378,7 @@ void QtMainWindow::build_ui() {
 
     auto* qa_actions = new QHBoxLayout();
     qa_live_ = new QPushButton(QStringLiteral("刷新实时状态"), qa_tab);
-    qa_send_ = new QPushButton(QStringLiteral("发送问题"), qa_tab);
+    qa_send_ = new QPushButton(QStringLiteral("发送给项目 Agent"), qa_tab);
     qa_actions->addWidget(qa_live_);
     qa_actions->addStretch();
     qa_actions->addWidget(qa_send_);
@@ -1366,7 +1390,7 @@ void QtMainWindow::build_ui() {
     connect(qa_send_, &QPushButton::clicked, this, [this] {
         ask_project();
     });
-    tabs_->addTab(qa_tab, QStringLiteral("提问"));
+    tabs_->addTab(qa_tab, QStringLiteral("项目 Agent"));
 
     connect(tabs_, &QTabWidget::currentChanged, this, [this](int) {
         render_context_header();
@@ -2025,21 +2049,66 @@ void QtMainWindow::render_project_qa() {
     if (qa_live_) qa_live_->setEnabled(has_project && has_live && !qa_process_);
     if (qa_send_) qa_send_->setEnabled(has_project && !qa_process_);
     if (qa_input_) qa_input_->setEnabled(has_project && !qa_process_);
-    if (!qa_status_) return;
+    if (!qa_status_ || !qa_history_) return;
 
     if (!has_project) {
         qa_status_->setText(QStringLiteral("未选择项目"));
+        qa_history_->clear();
         return;
     }
     if (qa_process_) {
-        qa_status_->setText(QStringLiteral("正在查询…"));
+        qa_status_->setText(QStringLiteral("正在读取实时状态…"));
         return;
     }
-    const auto sources = array(project->if_contains("qa_sources"));
-    qa_status_->setText(
-        sources && !sources->empty()
-            ? QStringLiteral("只读问答 · 已登记 %1 个来源").arg(sources->size())
-            : QStringLiteral("只读问答 · 使用项目目录"));
+
+    const auto project_id = s(project->if_contains("id"));
+    ProjectAgentChannel channel;
+    try {
+        channel = load_project_agent_channel(paths_, project_id, 1000);
+    } catch (const std::exception& error) {
+        qa_status_->setText(QStringLiteral("项目 Agent Channel 读取失败"));
+        qa_history_->setPlainText(q(error.what()));
+        return;
+    }
+
+    QStringList history;
+    for (const auto& message : channel.messages) {
+        if (message.kind == "monitor_request") {
+            history << QStringLiteral("【原监控请求】\n%1").arg(q(message.body));
+        } else if (message.kind == "context") {
+            history << QStringLiteral("【Monitor Hub 上下文】\n%1").arg(q(message.body));
+        } else if (message.kind == "live_status") {
+            history << QStringLiteral("【实时状态】\n%1").arg(q(message.body));
+        } else if (message.sender == "user") {
+            history << QStringLiteral("你：%1").arg(q(message.body));
+        } else if (message.sender == "agent") {
+            history << QStringLiteral("项目 Agent：%1").arg(q(message.body));
+        } else {
+            history << QStringLiteral("%1：%2")
+                           .arg(q(message.sender), q(message.body));
+        }
+    }
+    qa_history_->setPlainText(history.join(QStringLiteral("\n\n")));
+
+    const auto pending = pending_project_agent_questions(channel);
+    if (channel.binding) {
+        QString identity = q(channel.binding->session_name);
+        if (identity.isEmpty()) identity = q(channel.binding->agent_id);
+        if (identity.isEmpty()) identity = q(channel.binding->session_id);
+        if (identity.isEmpty()) identity = QStringLiteral("已绑定 Agent");
+        qa_status_->setText(
+            QStringLiteral("项目专属 Agent · %1 · 待回答 %2")
+                .arg(identity)
+                .arg(pending.size()));
+    } else {
+        qa_status_->setText(
+            QStringLiteral("尚未绑定发起 Agent · 消息会保存在项目通道中 · 待回答 %1")
+                .arg(pending.size()));
+    }
+
+    auto cursor = qa_history_->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    qa_history_->setTextCursor(cursor);
 }
 
 void QtMainWindow::run_project_live_query(bool ask_after) {
@@ -2075,11 +2144,24 @@ void QtMainWindow::run_project_live_query(bool ask_after) {
         [this, process, ask_after](QProcess::ProcessError error) {
             if (process != qa_process_ || error != QProcess::FailedToStart) return;
             const auto message = QStringLiteral("实时查询启动失败：%1").arg(process->errorString());
-            if (qa_history_) qa_history_->append(message);
             qa_process_ = nullptr;
             process->deleteLater();
-            render_project_qa();
-            if (ask_after) start_project_question(message);
+            if (ask_after) {
+                start_project_question(message);
+            } else if (const auto* project = current_project()) {
+                try {
+                    ProjectAgentMessage event;
+                    event.project_id = s(project->if_contains("id"));
+                    event.sender = "monitor_hub";
+                    event.target = "user";
+                    event.kind = "live_status";
+                    event.body = message.toUtf8().toStdString();
+                    event.source = "qt";
+                    append_project_agent_message(paths_, std::move(event));
+                } catch (...) {
+                }
+                render_project_qa();
+            }
         });
     connect(process, qOverload<int,QProcess::ExitStatus>(&QProcess::finished), this,
         [this, process, ask_after](int exit_code, QProcess::ExitStatus exit_status) {
@@ -2090,13 +2172,25 @@ void QtMainWindow::run_project_live_query(bool ask_after) {
                 output = QStringLiteral("实时查询失败（exit %1）：\n%2").arg(exit_code).arg(output);
             }
             qa_live_cache_ = output;
-            if (qa_history_ && !output.isEmpty()) {
-                qa_history_->append(QStringLiteral("[实时状态]\n%1").arg(output));
-            }
             qa_process_ = nullptr;
             process->deleteLater();
-            render_project_qa();
-            if (ask_after) start_project_question(output);
+
+            if (ask_after) {
+                start_project_question(output);
+            } else if (const auto* project = current_project()) {
+                try {
+                    ProjectAgentMessage event;
+                    event.project_id = s(project->if_contains("id"));
+                    event.sender = "monitor_hub";
+                    event.target = "user";
+                    event.kind = "live_status";
+                    event.body = output.toUtf8().toStdString();
+                    event.source = "qt";
+                    append_project_agent_message(paths_, std::move(event));
+                } catch (...) {
+                }
+                render_project_qa();
+            }
         });
     process->start();
 }
@@ -2105,155 +2199,76 @@ void QtMainWindow::ask_project() {
     if (!qa_input_ || qa_process_) return;
     const auto question = qa_input_->toPlainText().trimmed();
     if (question.isEmpty()) return;
-    if (qa_history_) qa_history_->append(QStringLiteral("你：%1").arg(question));
+
+    qa_pending_question_ = question;
     qa_input_->clear();
 
     const auto* project = current_project();
     const auto* live = project ? object(project->if_contains("live_query")) : nullptr;
-    if (live && array(live->if_contains("cmd")) && !array(live->if_contains("cmd"))->empty())
+    if (live && array(live->if_contains("cmd")) &&
+        !array(live->if_contains("cmd"))->empty()) {
         run_project_live_query(true);
-    else
+    } else {
         start_project_question({});
+    }
 }
 
 void QtMainWindow::start_project_question(const QString& live_context) {
     const auto* project = current_project();
     const auto* snap = current_snapshot();
-    if (!project || !snap || qa_process_ || !qa_history_) return;
+    if (!project || !snap || qa_pending_question_.trimmed().isEmpty()) return;
 
-    QString question;
-    const auto blocks = qa_history_->toPlainText().split(QStringLiteral("\n"));
-    for (auto it = blocks.crbegin(); it != blocks.crend(); ++it) {
-        if (it->startsWith(QStringLiteral("你："))) {
-            question = it->mid(2).trimmed();
-            break;
-        }
-    }
-    if (question.isEmpty()) return;
-
-    const auto claude = load_claude_cli_status(system_, paths_);
-    if (!claude.cli_found || claude.executable.empty()) {
-        qa_history_->append(QStringLiteral("Monitor Hub：未找到 Claude CLI。"));
-        if (qa_status_) qa_status_->setText(QStringLiteral("Claude CLI 不可用"));
-        return;
-    }
-
-    QStringList source_items;
-    if (const auto* sources = array(project->if_contains("qa_sources"))) {
-        for (const auto& item : *sources) source_items << q(s(&item));
-    }
-    if (source_items.isEmpty()) {
-        const auto dir = s(project->if_contains("dir"));
-        if (!dir.empty()) source_items << q(dir);
-    }
-
-    const auto project_name = q(s(project->if_contains("name")));
-    const auto system_prompt = QStringLiteral(
-        "You answer the user's questions about the monitored project \"%1\" and its monitor takeovers. "
-        "Answer in Chinese, lead with the answer, keep it short and concrete. "
-        "You can only read files with Read, Grep and Glob. Do not modify files, start/stop jobs, submit, commit or push. "
-        "If an action is needed, state exactly what should be done and let the user decide. Sources: %2")
-        .arg(project_name, source_items.join(QStringLiteral("; ")));
+    const auto project_id = s(project->if_contains("id"));
+    const auto correlation =
+        "qa:" + project_id + ":" + iso_now_local();
 
     QStringList context;
-    context << QStringLiteral("[Monitor Hub current view]")
-            << QStringLiteral("状态：%1").arg(q(s(snap->if_contains("health"))))
+    context << QStringLiteral("状态：%1").arg(q(s(snap->if_contains("health"))))
             << QStringLiteral("摘要：%1").arg(q(s(snap->if_contains("summary"))))
-            << QStringLiteral("问题：%1").arg(q(s(snap->if_contains("problem"), s(snap->if_contains("headline")))));
+            << QStringLiteral("问题：%1").arg(
+                   q(s(snap->if_contains("problem"),
+                       s(snap->if_contains("headline")))));
     if (!live_context.trimmed().isEmpty()) {
         context << QStringLiteral("")
-                << QStringLiteral("[Live query]")
+                << QStringLiteral("[刚刚查询的实时状态]")
                 << live_context;
     }
-    context << QStringLiteral("")
-            << QStringLiteral("[User question]")
-            << question;
 
-    QStringList args{
-        QStringLiteral("-p"),
-        QStringLiteral("--output-format"), QStringLiteral("stream-json"),
-        QStringLiteral("--verbose"),
-        QStringLiteral("--model"), QStringLiteral("opus"),
-        QStringLiteral("--permission-mode"), QStringLiteral("default"),
-        QStringLiteral("--setting-sources"), QStringLiteral("project"),
-        QStringLiteral("--strict-mcp-config"),
-        QStringLiteral("--tools"), QStringLiteral("Read,Grep,Glob"),
-        QStringLiteral("--disallowedTools"), QStringLiteral("Bash,Edit,Write,NotebookEdit"),
-        QStringLiteral("--append-system-prompt"), system_prompt,
-        QStringLiteral("--allowedTools"),
-        QStringLiteral("Read"), QStringLiteral("Grep"), QStringLiteral("Glob"),
-        context.join(QStringLiteral("\n"))
-    };
+    try {
+        ProjectAgentMessage context_message;
+        context_message.project_id = project_id;
+        context_message.sender = "monitor_hub";
+        context_message.target = "project_agent";
+        context_message.kind = "context";
+        context_message.body =
+            context.join(QStringLiteral("\n")).toUtf8().toStdString();
+        context_message.correlation_id = correlation;
+        context_message.source = "qt";
+        append_project_agent_message(paths_, std::move(context_message));
 
-    qa_process_ = new QProcess(this);
-    qa_process_->setProcessChannelMode(QProcess::MergedChannels);
-    const auto claude_program = q(claude.executable.string());
-#ifdef Q_OS_WIN
-    const auto suffix = QFileInfo(claude_program).suffix().toLower();
-    if (suffix == QStringLiteral("cmd") || suffix == QStringLiteral("bat")) {
-        qa_process_->setProgram(
-            QProcessEnvironment::systemEnvironment().value(
-                QStringLiteral("COMSPEC"),
-                QStringLiteral("cmd.exe")));
-        args.prepend(claude_program);
-        args.prepend(QStringLiteral("/c"));
-    } else {
-        qa_process_->setProgram(claude_program);
+        ProjectAgentMessage question;
+        question.project_id = project_id;
+        question.sender = "user";
+        question.target = "project_agent";
+        question.kind = "question";
+        question.body =
+            qa_pending_question_.toUtf8().toStdString();
+        question.correlation_id = correlation;
+        question.source = "qt";
+        append_project_agent_message(paths_, std::move(question));
+
+        qa_pending_question_.clear();
+        qa_live_cache_.clear();
+        render_project_qa();
+    } catch (const std::exception& error) {
+        if (qa_status_)
+            qa_status_->setText(QStringLiteral("消息保存失败"));
+        QMessageBox::warning(
+            this,
+            QStringLiteral("项目 Agent"),
+            QStringLiteral("无法把问题写入项目 Agent Channel：\n%1")
+                .arg(q(error.what())));
     }
-#else
-    qa_process_->setProgram(claude_program);
-#endif
-    qa_process_->setArguments(args);
-    const auto cwd = s(project->if_contains("qa_cwd"), s(project->if_contains("dir")));
-    if (!cwd.empty()) qa_process_->setWorkingDirectory(q(cwd));
-
-    auto env = QProcessEnvironment::systemEnvironment();
-    env.remove(QStringLiteral("CLAUDE_CONFIG_DIR"));
-    const auto config = s(project->if_contains("claude_config_dir"));
-    if (!config.empty()) env.insert(QStringLiteral("CLAUDE_CONFIG_DIR"), q(config));
-    qa_process_->setProcessEnvironment(env);
-
-    if (qa_live_) qa_live_->setEnabled(false);
-    if (qa_send_) qa_send_->setEnabled(false);
-    if (qa_input_) qa_input_->setEnabled(false);
-    if (qa_status_) qa_status_->setText(QStringLiteral("Claude 正在只读分析…"));
-
-    auto* process = qa_process_;
-    connect(process, &QProcess::errorOccurred, this,
-        [this, process](QProcess::ProcessError error) {
-            if (process != qa_process_ || error != QProcess::FailedToStart) return;
-            qa_history_->append(QStringLiteral("Monitor Hub：Claude 启动失败：%1").arg(process->errorString()));
-            qa_process_ = nullptr;
-            process->deleteLater();
-            render_project_qa();
-        });
-    connect(process, qOverload<int,QProcess::ExitStatus>(&QProcess::finished), this,
-        [this, process](int exit_code, QProcess::ExitStatus exit_status) {
-            if (process != qa_process_) return;
-            const auto raw = QString::fromUtf8(process->readAll());
-            QString answer;
-            const auto lines = raw.split(QLatin1Char('\n'));
-            for (const auto& line : lines) {
-                boost::system::error_code error;
-                const auto parsed = json::parse(line.toUtf8().toStdString(), error);
-                if (error || !parsed.is_object()) continue;
-                const auto& obj = parsed.as_object();
-                if (s(obj.if_contains("type")) != "result") continue;
-                answer = q(s(obj.if_contains("result")));
-            }
-            if (answer.trimmed().isEmpty()) {
-                answer = exit_status == QProcess::NormalExit && exit_code == 0
-                    ? raw.trimmed().right(6000)
-                    : QStringLiteral("Claude 问答失败（exit %1）：\n%2")
-                          .arg(exit_code)
-                          .arg(raw.trimmed().right(3000));
-            }
-            qa_history_->append(QStringLiteral("Claude：%1").arg(answer));
-            qa_process_ = nullptr;
-            process->deleteLater();
-            render_project_qa();
-        });
-    process->start();
 }
 
 void QtMainWindow::dragEnterEvent(QDragEnterEvent* event) {
@@ -2940,19 +2955,47 @@ void QtMainWindow::open_new_monitor_dialog(const QString& prefilled_workdir) {
             dialog,
             QStringLiteral("交给后台 Claude"),
             QStringLiteral(
-                "后台 Claude 会按这份说明设置监控、登记到总台并启动监控。\n\n"
-                "它可以执行你在“允许监控自动做的操作”中授权的动作；"
-                "超出范围的决定必须升级给你/主 Agent。\n\n确定提交吗？"),
+                "Monitor Hub 会按这份说明设置监控、登记到总台并启动监控。\n\n"
+                "新项目会拥有独立的 Agent Channel；如果当前 Agent 会话与项目目录匹配，"
+                "它会作为该监控项目的原始 Agent 绑定。后续提问不会再新建 headless Q&A 会话。\n\n"
+                "自动恢复仍严格受“允许/禁止操作”约束。\n\n确定提交吗？"),
             QMessageBox::Yes | QMessageBox::No,
             QMessageBox::No);
         if (answer != QMessageBox::Yes) return;
+
+        std::optional<ProjectAgentBinding> origin_agent;
+        const auto current_agent =
+            load_claude_cli_status(system_, paths_);
+        const auto agent_workspace =
+            !current_agent.project_dir.empty()
+                ? current_agent.project_dir
+                : current_agent.cwd;
+        if (!current_agent.session_id.empty() &&
+            ui_paths_related(
+                q(agent_workspace),
+                q(fields->workdir))) {
+            ProjectAgentBinding binding;
+            binding.provider = "claude_code";
+            binding.agent_id =
+                current_agent.agent_name.empty()
+                    ? std::string("claude-code")
+                    : current_agent.agent_name;
+            binding.session_id = current_agent.session_id;
+            binding.session_name = current_agent.session_name;
+            binding.workspace = agent_workspace;
+            binding.transcript_path =
+                current_agent.transcript_path.string();
+            origin_agent = std::move(binding);
+        }
 
         SetupRequestLaunch launch;
         try {
             launch = prepare_setup_request(
                 paths_,
                 body,
-                fs::path(fields->workdir));
+                fs::path(fields->workdir),
+                std::nullopt,
+                origin_agent);
         } catch (const std::exception& error) {
             QMessageBox::critical(
                 dialog,
@@ -3034,8 +3077,8 @@ void QtMainWindow::open_new_monitor_dialog(const QString& prefilled_workdir) {
                     this,
                     QStringLiteral("已提交"),
                     QStringLiteral(
-                        "已交给后台 Claude（%1）。\n"
-                        "“新任务办理”会显示办理进度和需要你决定的事项。")
+                        "已提交监控设置（%1）。\n"
+                        "“新任务办理”会显示办理进度；项目建立后，原始监控请求和后续 Agent 对话会保存在该项目自己的 Agent Channel 中。")
                         .arg(job_name));
                 process->deleteLater();
             });
