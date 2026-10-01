@@ -82,6 +82,15 @@ set MONITOR_HUB_DATA=%TEMP%\monitor-hub-demo\hubdata
 set MONITOR_HUB_NO_DISCOVERY=1
 ```
 
+Windows 安装版还支持在 **设置** 中保存登记表和 Hub 数据目录。路径优先级是：
+
+1. 命令行 `--registry` / `--hub-data`；
+2. 环境变量 `MONITOR_HUB_REGISTRY` / `MONITOR_HUB_DATA`；
+3. 设置中保存的路径；
+4. 默认路径。
+
+如果安装版首次启动没有找到登记表，会提示选择已有的 `monitor_hub_projects.json`。未指定 `MONITOR_HUB_DATA` 时，Qt/C++ 版默认使用当前用户的 `%LOCALAPPDATA%\Monitor Hub\`，不再依赖开发机绝对路径。
+
 新监控状态格式、命名规则与 UI 约定仍分别见：
 
 - [hub/hub_status.schema.json](hub/hub_status.schema.json)
