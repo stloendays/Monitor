@@ -257,11 +257,19 @@ int main(int argc, char** argv) {
                           << save_error << "\n";
                 return 3;
             }
+            const auto saved_channel =
+                monitor_hub::load_project_agent_channel(
+                    paths,
+                    *agent_bind_project,
+                    0);
             boost::json::object response;
             response["bound"] = true;
             response["project_id"] = *agent_bind_project;
-            response["binding"] =
-                monitor_hub::project_agent_binding_to_json(*binding);
+            response["binding"] = saved_channel.binding
+                ? boost::json::value(
+                      monitor_hub::project_agent_binding_to_json(
+                          *saved_channel.binding))
+                : boost::json::value(nullptr);
             std::cout << boost::json::serialize(response) << "\n";
             return 0;
         }
