@@ -3,6 +3,7 @@
 #include "monitor_hub/setup_request.hpp"
 #include "monitor_hub/windows_probe.hpp"
 
+#include <QAction>
 #include <QApplication>
 #include <QBrush>
 #include <QCheckBox>
