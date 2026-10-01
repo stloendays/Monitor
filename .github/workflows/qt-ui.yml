@@ -38,7 +38,11 @@ jobs:
 
       - name: Build desktop targets
         shell: pwsh
-        run: cmake --build cpp/build-qt --config Release --target monitor_hub_qt monitor_hub_cli
+        run: cmake --build cpp/build-qt --config Release --target monitor_hub_qt monitor_hub_cli monitor_hub_qt_desktop_settings_tests
+
+      - name: Desktop state persistence tests
+        shell: pwsh
+        run: ctest --test-dir cpp/build-qt -C Release --output-on-failure -R monitor_hub_qt_desktop_settings_tests
 
       - name: Desktop CLI smoke test
         shell: pwsh
