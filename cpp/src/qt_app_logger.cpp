@@ -12,6 +12,7 @@
 #include <QUrl>
 #include <QtGlobal>
 
+#include <cstddef>
 #include <cstdio>
 
 namespace monitor_hub {
@@ -59,10 +60,10 @@ bool rotate_logs(QString* error_message) {
     const QFileInfo current(path);
     if (!current.exists() || current.size() < kMaxLogBytes) return true;
 
-    for (int index = kLogBackups; index >= 1; --index) {
+    QFile::remove(path + QStringLiteral(".%1").arg(kLogBackups));
+    for (int index = kLogBackups - 1; index >= 1; --index) {
         const auto from = path + QStringLiteral(".%1").arg(index);
         const auto to = path + QStringLiteral(".%1").arg(index + 1);
-        if (index == kLogBackups) QFile::remove(to);
         if (QFileInfo::exists(from) && !QFile::rename(from, to)) {
             if (error_message)
                 *error_message =
