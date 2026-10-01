@@ -50,6 +50,7 @@ private:
     void render_task_detail();
     void render_event_timeline();
     void render_takeovers();
+    void render_takeover_stream();
     void render_results();
     void render_project_qa();
     void run_project_live_query(bool ask_after = false);
@@ -137,6 +138,7 @@ private:
     QTableWidget* event_timeline_ = nullptr;
 
     QTableWidget* takeovers_ = nullptr;
+    QTextEdit* takeover_stream_ = nullptr;
     QTableWidget* results_ = nullptr;
 
     QLabel* qa_status_ = nullptr;
