@@ -38,6 +38,8 @@
 #include <QHBoxLayout>
 #include <QDebug>
 
+#include <vector>
+
 namespace monitor_hub {
 namespace {
 
