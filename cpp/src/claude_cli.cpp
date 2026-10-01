@@ -556,6 +556,34 @@ std::string statusline_display(const json::object& snapshot) {
 
 }  // namespace
 
+ClaudeQuestionInvocation build_claude_read_only_question_invocation(
+    const std::string& prompt,
+    const std::string& system_prompt,
+    const std::string& model) {
+
+    ClaudeQuestionInvocation invocation;
+    invocation.arguments = {
+        "-p",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--model", model.empty() ? "opus" : model,
+        "--permission-mode", "default",
+        "--setting-sources", "project",
+        "--strict-mcp-config",
+        "--tools", "Read,Grep,Glob",
+        "--disallowedTools", "Bash,Edit,Write,NotebookEdit",
+        "--append-system-prompt", system_prompt,
+        "--allowedTools", "Read", "Grep", "Glob",
+    };
+
+    invocation.stdin_payload = prompt;
+    if (!invocation.stdin_payload.empty() &&
+        invocation.stdin_payload.back() != '\n') {
+        invocation.stdin_payload.push_back('\n');
+    }
+    return invocation;
+}
+
 ClaudeCliStatus load_claude_cli_status(
     const SystemInfo& system,
     const RuntimePaths& paths) {
