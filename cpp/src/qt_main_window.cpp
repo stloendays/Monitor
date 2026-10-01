@@ -122,11 +122,15 @@ fs::path local_fs_path(const QString& path) {
 #endif
 }
 
-void open_local(const std::string& path) {
-    if (!local_exists(path)) return;
-    const auto local = q(path);
+void open_local(const QString& path) {
+    const auto local = QDir::cleanPath(path);
+    if (local.isEmpty() || !QFileInfo::exists(local)) return;
     remember_recent_path(local);
     QDesktopServices::openUrl(QUrl::fromLocalFile(local));
+}
+
+void open_local(const std::string& path) {
+    open_local(q(path));
 }
 
 QColor health_color(const std::string& health) {
@@ -1214,7 +1218,7 @@ void QtMainWindow::build_ui() {
                 type->data(Qt::UserRole + 3).toString();
             if (!evidence.isEmpty() &&
                 QFileInfo::exists(evidence)) {
-                open_local(evidence.toUtf8().toStdString());
+                open_local(evidence);
                 return;
             }
             const auto task_id =
@@ -2310,7 +2314,7 @@ void QtMainWindow::show_recent_files_menu() {
             action->setToolTip(QDir::toNativeSeparators(path));
             action->setEnabled(info.exists());
             connect(action, &QAction::triggered, this, [path] {
-                open_local(path.toUtf8().toStdString());
+                open_local(path);
             });
         }
         menu.addSeparator();
@@ -2519,7 +2523,7 @@ void QtMainWindow::activate_search_result(
 
     if (!result.path.isEmpty()) {
         if (QFileInfo::exists(result.path))
-            open_local(result.path.toUtf8().toStdString());
+            open_local(result.path);
         return;
     }
 
