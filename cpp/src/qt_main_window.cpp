@@ -124,7 +124,9 @@ fs::path local_fs_path(const QString& path) {
 }
 
 QString normalized_compare_path(QString path) {
-    path = QDir::fromNativeSeparators(QDir::cleanPath(path.trimmed()));
+    path = path.trimmed();
+    if (path.isEmpty()) return {};
+    path = QDir::fromNativeSeparators(QDir::cleanPath(path));
     while (path.size() > 1 && path.endsWith(QLatin1Char('/')))
         path.chop(1);
 #ifdef Q_OS_WIN
