@@ -35,6 +35,7 @@ int main(int argc, char** argv) {
         std::optional<std::string> agent_reply_to;
         std::optional<std::string> agent_binding_file;
         std::string agent_source = "cli";
+        std::string agent_kind = "question";
         std::string agent_correlation;
 
         for (int i = 1; i < argc; ++i) {
@@ -72,6 +73,8 @@ int main(int argc, char** argv) {
                 agent_binding_file = argv[++i];
             else if (arg == "--agent-source" && i + 1 < argc)
                 agent_source = argv[++i];
+            else if (arg == "--agent-kind" && i + 1 < argc)
+                agent_kind = argv[++i];
             else if (arg == "--agent-correlation" && i + 1 < argc)
                 agent_correlation = argv[++i];
             else if (arg == "--registry" && i + 1 < argc)
@@ -108,6 +111,7 @@ int main(int argc, char** argv) {
                        "  --reply-to MESSAGE_ID     Question/instruction answered by --agent-reply.\n"
                        "  --binding-file FILE       Agent binding JSON for --agent-bind.\n"
                        "  --agent-source NAME       Source label stored with Agent messages (default: cli).\n"
+                       "  --agent-kind NAME         Kind for --agent-post (default: question; e.g. instruction, monitor_request).\n"
                        "  --agent-correlation ID    Optional correlation id stored with Agent messages.\n"
                        "\n"
                        "Without --system-info, --dump and --probe-system read Windows Task Scheduler and Win32_Process live through COM/WMI.\n"
@@ -285,7 +289,7 @@ int main(int argc, char** argv) {
             if (agent_post_project) {
                 message.sender = "user";
                 message.target = "project_agent";
-                message.kind = "question";
+                message.kind = agent_kind;
             } else {
                 if (!agent_reply_to || agent_reply_to->empty()) {
                     std::cerr << "--agent-reply requires --reply-to MESSAGE_ID\n";
