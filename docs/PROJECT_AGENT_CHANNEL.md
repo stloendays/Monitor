@@ -25,7 +25,7 @@ MONITOR_HUB_DATA/
 
 ## Binding
 
-`binding.json` records the Agent/session that owns the project conversation.
+`binding.json` records the project-specific logical Agent identity plus the originating/owner session that the conversation belongs with. If the origin metadata does not yet know the final project ID, binding normalizes `agent_id` to `project-agent:<project_id>`.
 
 Example:
 
@@ -33,7 +33,7 @@ Example:
 {
   "schema_version": 1,
   "provider": "claude_code",
-  "agent_id": "origin-agent",
+  "agent_id": "project-agent:alpha",
   "session_id": "session-123",
   "session_name": "Rh/CeO2 monitor",
   "workspace": "D:/Research/Rh-CeO2",
