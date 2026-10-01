@@ -244,6 +244,8 @@ bool save_project_agent_binding(
     auto normalized = binding;
     if (normalized.schema_version <= 0)
         normalized.schema_version = 1;
+    if (normalized.agent_id.empty())
+        normalized.agent_id = "project-agent:" + project_id;
     if (normalized.bound_at.empty())
         normalized.bound_at = iso_now_local();
 
