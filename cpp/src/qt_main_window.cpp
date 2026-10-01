@@ -29,8 +29,10 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTextEdit>
+#include <QTextCursor>
 #include <QTimer>
 #include <QUrl>
+#include <QFile>
 #include <QFileInfo>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -1124,7 +1126,23 @@ void QtMainWindow::build_ui() {
     takeovers_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     takeovers_->verticalHeader()->setVisible(false);
     takeovers_->horizontalHeader()->setStretchLastSection(true);
-    takeover_layout->addWidget(takeovers_);
+    takeover_layout->addWidget(takeovers_, 1);
+
+    auto* takeover_stream_label =
+        new QLabel(QStringLiteral("处理过程（实时尾部）"), takeover_tab);
+    takeover_stream_label->setObjectName(QStringLiteral("sectionLabel"));
+    takeover_layout->addWidget(takeover_stream_label);
+    takeover_stream_ = new QTextEdit(takeover_tab);
+    takeover_stream_->setReadOnly(true);
+    takeover_stream_->setMinimumHeight(150);
+    takeover_stream_->setPlaceholderText(
+        QStringLiteral("选择一条后台处理记录后，这里显示其最新读取、工具调用和结果。"
+                       "运行中的记录会随 Monitor Hub 刷新自动更新。"));
+    takeover_layout->addWidget(takeover_stream_, 1);
+
+    connect(takeovers_, &QTableWidget::cellClicked, this, [this](int, int) {
+        render_takeover_stream();
+    });
     connect(takeovers_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
         auto* item = takeovers_->item(row, 2);
         if (!item) return;
@@ -2667,6 +2685,104 @@ void QtMainWindow::render_takeovers() {
         takeovers_->setItem(row, 2, summary);
     }
     takeovers_->resizeColumnsToContents();
+    if (takeovers_->rowCount() > 0 && takeovers_->currentRow() < 0)
+        takeovers_->selectRow(0);
+    render_takeover_stream();
+}
+
+void QtMainWindow::render_takeover_stream() {
+    if (!takeover_stream_ || !takeovers_) return;
+    const auto row = takeovers_->currentRow();
+    if (row < 0) {
+        takeover_stream_->clear();
+        return;
+    }
+    auto* item = takeovers_->item(row, 2);
+    if (!item) {
+        takeover_stream_->clear();
+        return;
+    }
+    const auto path = item->data(Qt::UserRole).toString();
+    if (path.isEmpty()) {
+        takeover_stream_->setPlainText(QStringLiteral("这条记录没有可读取的原始文件。"));
+        return;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        takeover_stream_->setPlainText(
+            QStringLiteral("无法读取：%1").arg(path));
+        return;
+    }
+
+    constexpr qint64 kTailBytes = 180000;
+    if (file.size() > kTailBytes)
+        file.seek(file.size() - kTailBytes);
+    auto raw = QString::fromUtf8(file.readAll());
+    if (file.pos() > kTailBytes) {
+        const auto first_newline = raw.indexOf(QLatin1Char('\n'));
+        if (first_newline >= 0) raw.remove(0, first_newline + 1);
+    }
+
+    if (!path.endsWith(QStringLiteral(".jsonl"), Qt::CaseInsensitive)) {
+        takeover_stream_->setPlainText(raw.trimmed());
+        return;
+    }
+
+    QStringList readable;
+    const auto lines = raw.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    for (const auto& line : lines) {
+        boost::system::error_code error;
+        const auto parsed = json::parse(line.toUtf8().toStdString(), error);
+        if (error || !parsed.is_object()) continue;
+        const auto& event = parsed.as_object();
+        const auto type = s(event.if_contains("type"));
+
+        if (type == "result") {
+            const auto result = s(event.if_contains("result"));
+            if (!result.empty())
+                readable << QStringLiteral("✓ 结果：%1").arg(q(result));
+            continue;
+        }
+
+        const auto* message = object(event.if_contains("message"));
+        const auto* content = message ? array(message->if_contains("content"))
+                                      : array(event.if_contains("content"));
+        if (!content) continue;
+        for (const auto& block_value : *content) {
+            const auto* block = object(&block_value);
+            if (!block) continue;
+            const auto block_type = s(block->if_contains("type"));
+            if (block_type == "text") {
+                const auto text = s(block->if_contains("text"));
+                if (!text.empty()) readable << QStringLiteral("Claude：%1").arg(q(text));
+            } else if (block_type == "tool_use") {
+                const auto name = s(block->if_contains("name"));
+                QString detail;
+                if (const auto* input = object(block->if_contains("input"))) {
+                    for (const auto* key : {"file_path", "path", "pattern", "command"}) {
+                        const auto value = s(input->if_contains(key));
+                        if (!value.empty()) {
+                            detail = q(value);
+                            break;
+                        }
+                    }
+                }
+                readable << (detail.isEmpty()
+                    ? QStringLiteral("→ 工具：%1").arg(q(name))
+                    : QStringLiteral("→ %1：%2").arg(q(name), detail));
+            }
+        }
+    }
+
+    if (readable.isEmpty()) {
+        takeover_stream_->setPlainText(raw.trimmed().right(12000));
+    } else {
+        takeover_stream_->setPlainText(readable.join(QStringLiteral("\n\n")));
+    }
+    auto cursor = takeover_stream_->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    takeover_stream_->setTextCursor(cursor);
 }
 
 void QtMainWindow::render_results() {
