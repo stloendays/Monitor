@@ -4,12 +4,15 @@
 #include <atomic>
 #include <chrono>
 #include <cctype>
+#include <cstdint>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <regex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace monitor_hub {
 namespace {
