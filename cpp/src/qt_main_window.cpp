@@ -2074,10 +2074,6 @@ void QtMainWindow::run_project_live_query(bool ask_after) {
     if (qa_status_) qa_status_->setText(QStringLiteral("正在读取实时状态…"));
 
     auto* process = qa_process_;
-    connect(process, &QProcess::started, this, [process, stdin_payload] {
-        process->write(stdin_payload);
-        process->closeWriteChannel();
-    });
     connect(process, &QProcess::errorOccurred, this,
         [this, process, ask_after](QProcess::ProcessError error) {
             if (process != qa_process_ || error != QProcess::FailedToStart) return;
@@ -2222,6 +2218,10 @@ void QtMainWindow::start_project_question(const QString& live_context) {
     if (qa_status_) qa_status_->setText(QStringLiteral("Claude 正在只读分析…"));
 
     auto* process = qa_process_;
+    connect(process, &QProcess::started, this, [process, stdin_payload] {
+        process->write(stdin_payload);
+        process->closeWriteChannel();
+    });
     connect(process, &QProcess::errorOccurred, this,
         [this, process](QProcess::ProcessError error) {
             if (process != qa_process_ || error != QProcess::FailedToStart) return;
