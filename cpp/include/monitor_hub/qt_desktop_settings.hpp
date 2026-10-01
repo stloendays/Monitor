@@ -2,6 +2,9 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
+
+#include <vector>
 
 namespace monitor_hub {
 
@@ -14,6 +17,11 @@ struct DesktopSettings {
     QString hub_data_path;
 };
 
+struct DesktopConfigBackupInfo {
+    QString path;
+    QString captured_at;
+};
+
 struct DesktopUiState {
     QByteArray window_geometry;
     QByteArray window_state;
@@ -23,6 +31,19 @@ struct DesktopUiState {
 
 DesktopSettings load_desktop_settings();
 DesktopUiState load_desktop_ui_state();
+
+QStringList load_recent_paths(int limit = 15);
+bool remember_recent_path(
+    const QString& path,
+    QString* error_message = nullptr);
+bool clear_recent_paths(QString* error_message = nullptr);
+
+QString desktop_config_backup_directory();
+QString create_desktop_config_backup(QString* error_message = nullptr);
+std::vector<DesktopConfigBackupInfo> list_desktop_config_backups();
+bool restore_desktop_config_backup(
+    const QString& backup_path,
+    QString* error_message = nullptr);
 
 bool save_desktop_preferences(
     bool close_to_tray,

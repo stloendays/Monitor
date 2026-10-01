@@ -3,21 +3,30 @@
 #include "monitor_hub/setup_request.hpp"
 #include "monitor_hub/windows_probe.hpp"
 
+#include <QAction>
 #include <QApplication>
 #include <QBrush>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QClipboard>
 #include <QColor>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QDialog>
+#include <QDir>
 #include <QFontDatabase>
 #include <QFrame>
 #include <QHeaderView>
+#include <QLineEdit>
 #include <QLabel>
 #include <limits>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QMenu>
+#include <QMimeData>
 #include <QKeySequence>
 #include <QShortcut>
 #include <QPixmap>
@@ -106,9 +115,23 @@ bool local_exists(const std::string& path) {
     return std::filesystem::exists(std::filesystem::path(path), ec) && !ec;
 }
 
+fs::path local_fs_path(const QString& path) {
+#ifdef Q_OS_WIN
+    return fs::path(path.toStdWString());
+#else
+    return fs::path(path.toUtf8().toStdString());
+#endif
+}
+
+void open_local(const QString& path) {
+    const auto local = QDir::cleanPath(path);
+    if (local.isEmpty() || !QFileInfo::exists(local)) return;
+    remember_recent_path(local);
+    QDesktopServices::openUrl(QUrl::fromLocalFile(local));
+}
+
 void open_local(const std::string& path) {
-    if (!local_exists(path)) return;
-    QDesktopServices::openUrl(QUrl::fromLocalFile(q(path)));
+    open_local(q(path));
 }
 
 QColor health_color(const std::string& health) {
@@ -350,6 +373,7 @@ QtMainWindow::QtMainWindow(RuntimePaths paths, QWidget* parent)
     : QMainWindow(parent), paths_(std::move(paths)) {
     build_ui();
     install_shortcuts();
+    setAcceptDrops(true);
     resize(1420, 900);
     setWindowTitle(QStringLiteral("Monitor Hub"));
     refresh();
@@ -374,6 +398,14 @@ void QtMainWindow::install_shortcuts() {
         new QShortcut(QKeySequence(QStringLiteral("Ctrl+K")), this);
     connect(projects_shortcut, &QShortcut::activated, this, [this] {
         if (project_list_) project_list_->setFocus(Qt::ShortcutFocusReason);
+    });
+
+    auto* search_shortcut =
+        new QShortcut(QKeySequence::Find, this);
+    connect(search_shortcut, &QShortcut::activated, this, [this] {
+        if (!global_search_) return;
+        global_search_->setFocus(Qt::ShortcutFocusReason);
+        global_search_->selectAll();
     });
 
     for (int index = 0; index < 6; ++index) {
@@ -434,6 +466,22 @@ void QtMainWindow::build_ui() {
         QStringLiteral("项目列表来自登记表、Windows Task Scheduler 和 detached monitor 自动发现。"
                        "状态图标是当前运行状态，不是帮助提示。"), sidebar));
     side_layout->addLayout(side_head);
+
+    global_search_ = new QLineEdit(sidebar);
+    global_search_->setPlaceholderText(
+        QStringLiteral("搜索项目、任务、Issue、事件、Recent Files…"));
+    global_search_->setClearButtonEnabled(true);
+    global_search_->setToolTip(
+        QStringLiteral(
+            "输入后会先筛选左侧项目；按 Enter 打开全局搜索结果。"
+            "Ctrl+F 可随时聚焦这里。"));
+    side_layout->addWidget(global_search_);
+    connect(global_search_, &QLineEdit::textChanged, this, [this] {
+        filter_sidebar_projects();
+    });
+    connect(global_search_, &QLineEdit::returnPressed, this, [this] {
+        show_search_dialog(global_search_->text());
+    });
 
     project_list_ = new QListWidget(sidebar);
     project_list_->setObjectName(QStringLiteral("projectList"));
@@ -698,6 +746,11 @@ void QtMainWindow::build_ui() {
     quick_copy_debug_ = make_quick(
         QStringLiteral("复制诊断"),
         QStringLiteral("把当前项目、状态、runner、关键路径和选中任务信息复制到剪贴板，便于发给 Agent 排查。不会复制密码或 token。"));
+    quick_recent_ = make_quick(
+        QStringLiteral("Recent Files"),
+        QStringLiteral(
+            "显示最近从 Monitor Hub 打开的文件和目录。"
+            "拖拽到窗口的本地路径也会进入这里。"));
 
     auto* project_actions = new QHBoxLayout();
     project_actions->setSpacing(7);
@@ -713,7 +766,7 @@ void QtMainWindow::build_ui() {
     system_actions->setSpacing(7);
     for (auto* button : {
              quick_registry_, quick_hub_data_, quick_job_root_,
-             quick_copy_command_, quick_copy_debug_}) {
+             quick_recent_, quick_copy_command_, quick_copy_debug_}) {
         system_actions->addWidget(button);
     }
     system_actions->addStretch();
@@ -772,6 +825,9 @@ void QtMainWindow::build_ui() {
     });
     connect(quick_copy_debug_, &QPushButton::clicked, this, [this] {
         copy_debug_summary();
+    });
+    connect(quick_recent_, &QPushButton::clicked, this, [this] {
+        show_recent_files_menu();
     });
 
     main_layout->addWidget(quick_bar);
@@ -1007,7 +1063,11 @@ void QtMainWindow::build_ui() {
     split->setStretchFactor(1, 1);
     progress_layout->addWidget(split, 1);
 
-    connect(progress_, &QTableWidget::itemSelectionChanged, this, [this] { render_task_detail(); });
+    connect(progress_, &QTableWidget::itemSelectionChanged, this, [this] {
+        render_task_detail();
+        if (event_current_task_ && event_current_task_->isChecked())
+            render_event_timeline();
+    });
     connect(progress_, &QTableWidget::cellDoubleClicked, this, [this](int, int) { open_task_target(); });
     connect(open_task_, &QPushButton::clicked, this, [this] { open_task_target(); });
     connect(open_log_, &QPushButton::clicked, this, [this] { open_task_target("log"); });
@@ -1089,18 +1149,44 @@ void QtMainWindow::build_ui() {
     issues_->horizontalHeader()->setStretchLastSection(true);
     event_layout->addWidget(issues_, 1);
 
+    auto* timeline_head = new QHBoxLayout();
     auto* timeline_label = new QLabel(QStringLiteral("事件时间线"), event_tab);
     timeline_label->setObjectName(QStringLiteral("sectionLabel"));
     timeline_label->setFont(section_font);
-    event_layout->addWidget(timeline_label);
+    timeline_head->addWidget(timeline_label);
+    event_filter_ = new QLineEdit(event_tab);
+    event_filter_->setPlaceholderText(
+        QStringLiteral("筛选事件、任务、Issue、来源或摘要…"));
+    event_filter_->setClearButtonEnabled(true);
+    timeline_head->addWidget(event_filter_, 1);
+    event_kind_filter_ = new QComboBox(event_tab);
+    event_kind_filter_->addItem(QStringLiteral("全部事件"), QString{});
+    event_kind_filter_->addItem(QStringLiteral("Issue"), QStringLiteral("issue."));
+    event_kind_filter_->addItem(QStringLiteral("Agent"), QStringLiteral("agent."));
+    event_kind_filter_->addItem(QStringLiteral("Task"), QStringLiteral("task."));
+    event_kind_filter_->addItem(
+        QStringLiteral("通知"),
+        QStringLiteral("notification."));
+    event_kind_filter_->addItem(
+        QStringLiteral("项目"),
+        QStringLiteral("project."));
+    event_kind_filter_->addItem(
+        QStringLiteral("Monitor"),
+        QStringLiteral("monitor."));
+    timeline_head->addWidget(event_kind_filter_);
+    event_current_task_ =
+        new QCheckBox(QStringLiteral("仅当前任务"), event_tab);
+    timeline_head->addWidget(event_current_task_);
+    event_layout->addLayout(timeline_head);
 
     event_timeline_ = new QTableWidget(event_tab);
     configure_table(event_timeline_);
-    event_timeline_->setColumnCount(5);
+    event_timeline_->setColumnCount(6);
     event_timeline_->setHorizontalHeaderLabels({
         QStringLiteral("时间"),
         QStringLiteral("事件"),
         QStringLiteral("任务"),
+        QStringLiteral("Issue"),
         QStringLiteral("来源"),
         QStringLiteral("摘要"),
     });
@@ -1110,6 +1196,40 @@ void QtMainWindow::build_ui() {
     event_timeline_->verticalHeader()->setVisible(false);
     event_timeline_->horizontalHeader()->setStretchLastSection(true);
     event_layout->addWidget(event_timeline_, 2);
+
+    connect(event_filter_, &QLineEdit::textChanged, this, [this] {
+        render_event_timeline();
+    });
+    connect(
+        event_kind_filter_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [this](int) { render_event_timeline(); });
+    connect(event_current_task_, &QCheckBox::toggled, this, [this](bool) {
+        render_event_timeline();
+    });
+    connect(
+        event_timeline_,
+        &QTableWidget::cellDoubleClicked,
+        this,
+        [this](int row, int) {
+            auto* type = event_timeline_->item(row, 1);
+            if (!type) return;
+            const auto evidence =
+                type->data(Qt::UserRole + 3).toString();
+            if (!evidence.isEmpty() &&
+                QFileInfo::exists(evidence)) {
+                open_local(evidence);
+                return;
+            }
+            const auto task_id =
+                type->data(Qt::UserRole + 1).toString();
+            if (task_id.isEmpty()) return;
+            selected_task_id_ =
+                task_id.toUtf8().toStdString();
+            render_project();
+            if (tabs_) tabs_->setCurrentIndex(1);
+        });
 
     connect(
         recovery_flow_,
@@ -1594,6 +1714,7 @@ void QtMainWindow::refresh_quick_actions() {
     if (quick_job_root_) quick_job_root_->setEnabled(local_exists(paths_.job_root.string()));
     if (quick_copy_command_) quick_copy_command_->setEnabled(!command.empty());
     if (quick_copy_debug_) quick_copy_debug_->setEnabled(project != nullptr);
+    if (quick_recent_) quick_recent_->setEnabled(!load_recent_paths().isEmpty());
 }
 
 void QtMainWindow::render_overview() {
@@ -1705,6 +1826,28 @@ void QtMainWindow::render_sidebar() {
     }
     if (selected_row >= 0) project_list_->setCurrentRow(selected_row);
     project_list_->blockSignals(false);
+    filter_sidebar_projects();
+}
+
+void QtMainWindow::filter_sidebar_projects() {
+    if (!project_list_) return;
+    const auto query =
+        global_search_ ? global_search_->text().trimmed().toCaseFolded()
+                       : QString{};
+    for (int row = 0; row < project_list_->count(); ++row) {
+        auto* item = project_list_->item(row);
+        if (!item) continue;
+        if (query.isEmpty()) {
+            item->setHidden(false);
+            continue;
+        }
+        const auto haystack =
+            (item->text() + QLatin1Char(' ') +
+             item->toolTip() + QLatin1Char(' ') +
+             item->data(Qt::UserRole).toString())
+                .toCaseFolded();
+        item->setHidden(!haystack.contains(query));
+    }
 }
 
 const json::object* QtMainWindow::current_project() const {
@@ -2113,7 +2256,594 @@ void QtMainWindow::start_project_question(const QString& live_context) {
     process->start();
 }
 
-void QtMainWindow::open_new_monitor_dialog() {
+void QtMainWindow::dragEnterEvent(QDragEnterEvent* event) {
+    if (!event || !event->mimeData() || !event->mimeData()->hasUrls()) {
+        QMainWindow::dragEnterEvent(event);
+        return;
+    }
+
+    for (const auto& url : event->mimeData()->urls()) {
+        if (url.isLocalFile()) {
+            event->acceptProposedAction();
+            return;
+        }
+    }
+    QMainWindow::dragEnterEvent(event);
+}
+
+void QtMainWindow::dropEvent(QDropEvent* event) {
+    if (!event || !event->mimeData() || !event->mimeData()->hasUrls()) {
+        QMainWindow::dropEvent(event);
+        return;
+    }
+
+    QStringList paths;
+    for (const auto& url : event->mimeData()->urls()) {
+        if (!url.isLocalFile()) continue;
+        const auto path = QDir::cleanPath(url.toLocalFile());
+        if (!path.isEmpty() && QFileInfo::exists(path))
+            paths << path;
+    }
+    paths.removeDuplicates();
+
+    if (paths.isEmpty()) {
+        QMainWindow::dropEvent(event);
+        return;
+    }
+
+    event->acceptProposedAction();
+    handle_dropped_paths(paths);
+}
+
+void QtMainWindow::show_recent_files_menu() {
+    if (!quick_recent_) return;
+
+    QMenu menu(this);
+    const auto recent = load_recent_paths();
+    if (recent.isEmpty()) {
+        auto* empty = menu.addAction(QStringLiteral("暂无 Recent Files"));
+        empty->setEnabled(false);
+    } else {
+        for (const auto& path : recent) {
+            const QFileInfo info(path);
+            auto label = info.fileName();
+            if (label.isEmpty()) label = QDir::toNativeSeparators(path);
+            if (!info.exists())
+                label = QStringLiteral("（缺失）%1").arg(label);
+
+            auto* action = menu.addAction(label);
+            action->setToolTip(QDir::toNativeSeparators(path));
+            action->setEnabled(info.exists());
+            connect(action, &QAction::triggered, this, [path] {
+                open_local(path);
+            });
+        }
+        menu.addSeparator();
+        auto* clear = menu.addAction(QStringLiteral("清除 Recent Files"));
+        connect(clear, &QAction::triggered, this, [this] {
+            QString error;
+            if (!clear_recent_paths(&error)) {
+                QMessageBox::warning(
+                    this,
+                    QStringLiteral("Monitor Hub"),
+                    QStringLiteral("清除 Recent Files 失败：%1").arg(error));
+                return;
+            }
+            if (quick_recent_) quick_recent_->setEnabled(false);
+        });
+    }
+
+    const auto pos = quick_recent_->mapToGlobal(
+        QPoint(0, quick_recent_->height()));
+    menu.exec(pos);
+}
+
+std::vector<WorkspaceSearchDocument>
+QtMainWindow::build_search_documents() const {
+    std::vector<WorkspaceSearchDocument> documents;
+    qint64 order = 0;
+
+    for (const auto& project : projects_) {
+        const auto id = s(project.if_contains("id"));
+        const auto name = s(project.if_contains("name"), id);
+        const auto area = s(project.if_contains("area"));
+        const auto snap_it = snapshots_.find(id);
+
+        QStringList project_context;
+        if (!area.empty()) project_context << q(area);
+        project_context << QStringLiteral("project_id=%1").arg(q(id));
+        if (snap_it != snapshots_.end()) {
+            const auto& snap = snap_it->second;
+            auto headline = s(snap.if_contains("problem"));
+            if (headline.empty()) headline = s(snap.if_contains("headline"));
+            if (!headline.empty()) project_context << q(headline);
+            const auto health = s(snap.if_contains("health"));
+            if (!health.empty())
+                project_context << QStringLiteral("health=%1").arg(q(health));
+        }
+
+        documents.push_back({
+            QStringLiteral("项目"),
+            q(name),
+            project_context.join(QStringLiteral(" · ")),
+            q(name),
+            q(id),
+            {},
+            {},
+            {},
+            {},
+            1,
+            ++order,
+        });
+
+        if (snap_it != snapshots_.end()) {
+            const auto& snap = snap_it->second;
+            const auto* table = object(snap.if_contains("table"));
+            const auto* rows = table ? array(table->if_contains("rows")) : nullptr;
+            const auto* metas = table ? array(table->if_contains("row_meta")) : nullptr;
+            if (rows) {
+                for (std::size_t index = 0; index < rows->size(); ++index) {
+                    const auto* row = array(&(*rows)[index]);
+                    const auto* meta =
+                        metas && index < metas->size()
+                            ? object(&(*metas)[index])
+                            : nullptr;
+                    QStringList values;
+                    if (row) {
+                        for (const auto& value : *row)
+                            values << q(s(&value));
+                    }
+
+                    auto task_id = meta ? s(meta->if_contains("task_id"))
+                                        : std::string{};
+                    QString title =
+                        task_id.empty()
+                            ? (values.isEmpty()
+                                   ? QStringLiteral("任务 %1").arg(index + 1)
+                                   : values.front())
+                            : q(task_id);
+
+                    QStringList details = values;
+                    if (meta) {
+                        for (const auto* key : {
+                                 "job_id", "host", "path", "workdir",
+                                 "log", "result"}) {
+                            const auto value = s(meta->if_contains(key));
+                            if (!value.empty())
+                                details << QStringLiteral("%1=%2")
+                                               .arg(QString::fromLatin1(key), q(value));
+                        }
+                    }
+
+                    documents.push_back({
+                        QStringLiteral("任务"),
+                        title,
+                        details.join(QStringLiteral(" · ")),
+                        q(name),
+                        q(id),
+                        q(task_id),
+                        {},
+                        {},
+                        {},
+                        1,
+                        ++order,
+                    });
+                }
+            }
+        }
+
+        const auto projection_it = event_projections_.find(id);
+        if (projection_it == event_projections_.end()) continue;
+        const auto& projection = projection_it->second;
+
+        for (const auto& issue : projection.issues) {
+            QStringList details;
+            details
+                << q(issue_recovery_stage_display_name(
+                       issue_recovery_stage(issue)));
+            if (!issue.task_id.empty())
+                details << QStringLiteral("task=%1").arg(q(issue.task_id));
+            if (!issue.current_action.empty())
+                details << q(issue.current_action);
+            if (!issue.summary.empty())
+                details << q(issue.summary);
+
+            documents.push_back({
+                QStringLiteral("Issue"),
+                issue.issue_id.empty()
+                    ? QStringLiteral("未命名 Issue")
+                    : q(issue.issue_id),
+                details.join(QStringLiteral(" · ")),
+                q(name),
+                q(id),
+                q(issue.task_id),
+                q(issue.issue_id),
+                {},
+                {},
+                2,
+                ++order,
+            });
+        }
+
+        for (const auto& event : projection.events) {
+            QStringList details;
+            if (!event.occurred_at.empty())
+                details << q(event.occurred_at);
+            if (!event.task_id.empty())
+                details << QStringLiteral("task=%1").arg(q(event.task_id));
+            if (!event.issue_id.empty())
+                details << QStringLiteral("issue=%1").arg(q(event.issue_id));
+            if (!event.source_kind.empty())
+                details << QStringLiteral("source=%1").arg(q(event.source_kind));
+            if (!event.summary.empty())
+                details << q(event.summary);
+
+            documents.push_back({
+                QStringLiteral("事件"),
+                q(event_display_name(event.event_type)),
+                details.join(QStringLiteral(" · ")),
+                q(name),
+                q(id),
+                q(event.task_id),
+                q(event.issue_id),
+                q(event.event_id),
+                {},
+                2,
+                ++order,
+            });
+        }
+    }
+
+    const auto recent = load_recent_paths();
+    qint64 recent_order = 1000000;
+    for (int index = 0; index < recent.size(); ++index) {
+        const auto& path = recent[index];
+        const QFileInfo info(path);
+        auto title = info.fileName();
+        if (title.isEmpty()) title = QDir::toNativeSeparators(path);
+        documents.push_back({
+            QStringLiteral("Recent File"),
+            title,
+            QDir::toNativeSeparators(path),
+            {},
+            {},
+            {},
+            {},
+            {},
+            path,
+            -1,
+            recent_order - index,
+        });
+    }
+
+    return documents;
+}
+
+void QtMainWindow::activate_search_result(
+    const WorkspaceSearchDocument& result) {
+
+    if (!result.path.isEmpty()) {
+        if (QFileInfo::exists(result.path))
+            open_local(result.path);
+        return;
+    }
+
+    if (!result.project_id.isEmpty()) {
+        select_project(
+            result.project_id.toUtf8().toStdString());
+    }
+
+    if (!result.task_id.isEmpty()) {
+        selected_task_id_ =
+            result.task_id.toUtf8().toStdString();
+        render_project();
+    }
+
+    if (!result.event_id.isEmpty()) {
+        if (event_filter_) event_filter_->clear();
+        if (event_kind_filter_) event_kind_filter_->setCurrentIndex(0);
+        if (event_current_task_) event_current_task_->setChecked(false);
+        render_event_timeline();
+    }
+
+    if (tabs_ &&
+        result.tab_index >= 0 &&
+        result.tab_index < tabs_->count()) {
+        tabs_->setCurrentIndex(result.tab_index);
+    }
+
+    if (!result.issue_id.isEmpty() && issues_) {
+        for (int row = 0; row < issues_->rowCount(); ++row) {
+            auto* item = issues_->item(row, 1);
+            if (item &&
+                item->data(Qt::UserRole).toString() ==
+                    result.issue_id) {
+                issues_->selectRow(row);
+                issues_->scrollToItem(item);
+                break;
+            }
+        }
+    }
+
+    if (!result.event_id.isEmpty() && event_timeline_) {
+        for (int row = 0; row < event_timeline_->rowCount(); ++row) {
+            auto* item = event_timeline_->item(row, 1);
+            if (item &&
+                item->data(Qt::UserRole).toString() ==
+                    result.event_id) {
+                event_timeline_->selectRow(row);
+                event_timeline_->scrollToItem(item);
+                break;
+            }
+        }
+    }
+}
+
+void QtMainWindow::show_search_dialog(const QString& initial_query) {
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("Monitor Hub 全局搜索"));
+    dialog.resize(980, 640);
+
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(10);
+
+    auto* query = new QLineEdit(&dialog);
+    query->setPlaceholderText(
+        QStringLiteral(
+            "搜索项目、任务、Issue、事件、来源、路径或 Recent Files…"));
+    query->setClearButtonEnabled(true);
+    layout->addWidget(query);
+
+    auto* count = new QLabel(&dialog);
+    count->setObjectName(QStringLiteral("mutedText"));
+    layout->addWidget(count);
+
+    auto* table = new QTableWidget(&dialog);
+    configure_table(table);
+    table->setColumnCount(4);
+    table->setHorizontalHeaderLabels({
+        QStringLiteral("类型"),
+        QStringLiteral("名称"),
+        QStringLiteral("项目"),
+        QStringLiteral("上下文"),
+    });
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->verticalHeader()->setVisible(false);
+    table->horizontalHeader()->setStretchLastSection(true);
+    layout->addWidget(table, 1);
+
+    auto* close = new QPushButton(QStringLiteral("关闭"), &dialog);
+    auto* actions = new QHBoxLayout();
+    actions->addStretch();
+    actions->addWidget(close);
+    layout->addLayout(actions);
+    connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    const auto documents = build_search_documents();
+
+    auto populate = [table, count, &documents](const QString& text) {
+        const auto results =
+            search_workspace_documents(documents, text, 120);
+        table->setRowCount(static_cast<int>(results.size()));
+
+        for (int row = 0; row < static_cast<int>(results.size()); ++row) {
+            const auto& result =
+                results[static_cast<std::size_t>(row)];
+            table->setItem(
+                row,
+                0,
+                new QTableWidgetItem(result.kind));
+
+            auto* title = new QTableWidgetItem(result.title);
+            title->setData(Qt::UserRole, result.kind);
+            title->setData(Qt::UserRole + 1, result.project_id);
+            title->setData(Qt::UserRole + 2, result.task_id);
+            title->setData(Qt::UserRole + 3, result.issue_id);
+            title->setData(Qt::UserRole + 4, result.event_id);
+            title->setData(Qt::UserRole + 5, result.path);
+            title->setData(Qt::UserRole + 6, result.tab_index);
+            table->setItem(row, 1, title);
+
+            table->setItem(
+                row,
+                2,
+                new QTableWidgetItem(result.project_label));
+            table->setItem(
+                row,
+                3,
+                new QTableWidgetItem(result.subtitle));
+        }
+
+        table->resizeColumnsToContents();
+        table->horizontalHeader()->setStretchLastSection(true);
+        if (table->rowCount() > 0)
+            table->selectRow(0);
+        count->setText(
+            QStringLiteral("找到 %1 项")
+                .arg(static_cast<qulonglong>(results.size())));
+    };
+
+    auto activate_row = [this, table, &dialog](int row) {
+        if (row < 0 || row >= table->rowCount()) return;
+        auto* title = table->item(row, 1);
+        if (!title) return;
+
+        WorkspaceSearchDocument result;
+        result.kind = title->data(Qt::UserRole).toString();
+        result.project_id =
+            title->data(Qt::UserRole + 1).toString();
+        result.task_id =
+            title->data(Qt::UserRole + 2).toString();
+        result.issue_id =
+            title->data(Qt::UserRole + 3).toString();
+        result.event_id =
+            title->data(Qt::UserRole + 4).toString();
+        result.path =
+            title->data(Qt::UserRole + 5).toString();
+        result.tab_index =
+            title->data(Qt::UserRole + 6).toInt();
+
+        activate_search_result(result);
+        dialog.accept();
+    };
+
+    connect(query, &QLineEdit::textChanged, &dialog, populate);
+    connect(
+        table,
+        &QTableWidget::cellDoubleClicked,
+        &dialog,
+        [activate_row](int row, int) { activate_row(row); });
+    connect(
+        table,
+        &QTableWidget::itemActivated,
+        &dialog,
+        [table, activate_row](QTableWidgetItem* item) {
+            if (item) activate_row(table->row(item));
+        });
+    connect(query, &QLineEdit::returnPressed, &dialog, [table, activate_row] {
+        activate_row(table->currentRow());
+    });
+
+    query->setText(initial_query);
+    populate(initial_query);
+    query->setFocus(Qt::ShortcutFocusReason);
+    query->selectAll();
+    dialog.exec();
+}
+
+void QtMainWindow::handle_dropped_paths(const QStringList& dropped_paths) {
+    QStringList paths;
+    for (const auto& path : dropped_paths) {
+        const auto clean = QDir::cleanPath(path);
+        if (clean.isEmpty() || !QFileInfo::exists(clean)) continue;
+        paths << clean;
+        remember_recent_path(clean);
+    }
+    paths.removeDuplicates();
+    if (paths.isEmpty()) return;
+
+    if (paths.size() > 1) {
+        if (quick_feedback_) {
+            quick_feedback_->setText(
+                QStringLiteral("已加入 Recent Files：%1 项")
+                    .arg(paths.size()));
+        }
+        if (quick_recent_) quick_recent_->setEnabled(true);
+        return;
+    }
+
+    const auto path = paths.front();
+    const QFileInfo info(path);
+
+    if (info.isFile() &&
+        info.fileName().compare(
+            QStringLiteral("monitor_hub_projects.json"),
+            Qt::CaseInsensitive) == 0) {
+        const auto answer = QMessageBox::question(
+            this,
+            QStringLiteral("导入 Monitor Hub 登记表"),
+            QStringLiteral(
+                "要把下面的文件设为当前 Monitor Hub 登记表吗？\n\n%1\n\n"
+                "导入前会自动备份当前桌面配置。")
+                .arg(QDir::toNativeSeparators(path)),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (answer != QMessageBox::Yes) return;
+
+        QString backup_error;
+        const auto backup =
+            create_desktop_config_backup(&backup_error);
+
+        const auto current = load_desktop_settings();
+        const auto hub_data =
+            current.hub_data_path.trimmed().isEmpty()
+                ? q(paths_.hub_data.string())
+                : current.hub_data_path;
+
+        QString error;
+        if (!save_runtime_locations(path, hub_data, &error)) {
+            QMessageBox::critical(
+                this,
+                QStringLiteral("导入失败"),
+                QStringLiteral("无法保存登记表路径：%1").arg(error));
+            return;
+        }
+
+        paths_.registry = local_fs_path(path);
+        refresh();
+        if (quick_feedback_)
+            quick_feedback_->setText(QStringLiteral("登记表已导入"));
+
+        if (backup.isEmpty() && !backup_error.isEmpty()) {
+            QMessageBox::warning(
+                this,
+                QStringLiteral("登记表已导入"),
+                QStringLiteral(
+                    "登记表已切换，但旧配置备份失败：%1")
+                    .arg(backup_error));
+        }
+        return;
+    }
+
+    if (info.isDir()) {
+        QMessageBox box(this);
+        box.setWindowTitle(QStringLiteral("拖入项目目录"));
+        box.setText(
+            QStringLiteral("已拖入目录：\n%1")
+                .arg(QDir::toNativeSeparators(path)));
+        box.setInformativeText(
+            QStringLiteral(
+                "可以把它作为“新建监控任务”的项目目录，"
+                "也可以只用资源管理器打开。"));
+        auto* create =
+            box.addButton(
+                QStringLiteral("新建监控任务"),
+                QMessageBox::AcceptRole);
+        auto* open =
+            box.addButton(
+                QStringLiteral("打开目录"),
+                QMessageBox::ActionRole);
+        box.addButton(QMessageBox::Cancel);
+        box.exec();
+
+        if (box.clickedButton() == create)
+            open_new_monitor_dialog(path);
+        else if (box.clickedButton() == open)
+            open_local(path);
+        return;
+    }
+
+    static const QStringList safe_suffixes = {
+        QStringLiteral("txt"),
+        QStringLiteral("log"),
+        QStringLiteral("md"),
+        QStringLiteral("json"),
+        QStringLiteral("csv"),
+        QStringLiteral("tsv"),
+        QStringLiteral("pdf"),
+        QStringLiteral("png"),
+        QStringLiteral("jpg"),
+        QStringLiteral("jpeg"),
+        QStringLiteral("out"),
+        QStringLiteral("xml"),
+        QStringLiteral("yaml"),
+        QStringLiteral("yml"),
+    };
+
+    if (safe_suffixes.contains(info.suffix(), Qt::CaseInsensitive)) {
+        open_local(path.toUtf8().toStdString());
+    } else if (quick_feedback_) {
+        quick_feedback_->setText(
+            QStringLiteral("已加入 Recent Files：%1")
+                .arg(info.fileName()));
+    }
+    if (quick_recent_) quick_recent_->setEnabled(true);
+}
+
+void QtMainWindow::open_new_monitor_dialog(const QString& prefilled_workdir) {
     auto* dialog = new QDialog(this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setWindowTitle(QStringLiteral("新建监控任务"));
@@ -2136,7 +2866,23 @@ void QtMainWindow::open_new_monitor_dialog() {
     layout->addWidget(help);
 
     auto* editor = new QTextEdit(dialog);
-    editor->setPlainText(q(setup_request_template()));
+    auto initial_request = q(setup_request_template());
+    if (!prefilled_workdir.trimmed().isEmpty()) {
+        const auto clean =
+            QDir::toNativeSeparators(
+                QDir::cleanPath(prefilled_workdir));
+        auto project_name = QFileInfo(clean).fileName();
+        if (project_name.isEmpty())
+            project_name = QStringLiteral("新监控项目");
+        initial_request.replace(
+            QStringLiteral("项目名称：\n"),
+            QStringLiteral("项目名称：%1\n").arg(project_name));
+        initial_request.replace(
+            QStringLiteral("项目目录（本机路径）：\n"),
+            QStringLiteral("项目目录（本机路径）：%1\n").arg(clean));
+        remember_recent_path(clean);
+    }
+    editor->setPlainText(initial_request);
     editor->setAcceptRichText(false);
     layout->addWidget(editor, 1);
 
@@ -2540,13 +3286,72 @@ void QtMainWindow::render_event_timeline() {
         if (stage == "needs_user") ++waiting_decision;
     }
 
+    if (event_current_task_)
+        event_current_task_->setEnabled(!selected_task_id_.empty());
+
+    const auto kind_prefix =
+        event_kind_filter_
+            ? event_kind_filter_->currentData().toString()
+            : QString{};
+    const auto filter_text =
+        event_filter_
+            ? event_filter_->text().trimmed().toCaseFolded()
+            : QString{};
+    const auto filter_tokens =
+        filter_text.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    const bool current_task_only =
+        event_current_task_ &&
+        event_current_task_->isChecked() &&
+        !selected_task_id_.empty();
+
+    std::vector<const EventRecord*> visible_events;
+    visible_events.reserve(projection.events.size());
+    for (auto it = projection.events.rbegin();
+         it != projection.events.rend();
+         ++it) {
+        const auto& event = *it;
+        if (!kind_prefix.isEmpty() &&
+            !q(event.event_type).startsWith(kind_prefix)) {
+            continue;
+        }
+        if (current_task_only &&
+            event.task_id != selected_task_id_) {
+            continue;
+        }
+
+        QStringList searchable;
+        searchable
+            << q(event.event_type)
+            << q(event_display_name(event.event_type))
+            << q(event.task_id)
+            << q(event.issue_id)
+            << q(event.source_kind)
+            << q(event.source_id)
+            << q(event.summary)
+            << q(event.authority);
+        for (const auto& ref : event.evidence_refs)
+            searchable << q(ref);
+        const auto haystack =
+            searchable.join(QLatin1Char(' ')).toCaseFolded();
+
+        bool matches = true;
+        for (const auto& token : filter_tokens) {
+            if (!haystack.contains(token)) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) visible_events.push_back(&event);
+    }
+
     event_status_->setText(
         QStringLiteral(
-            "未解决 %1 · 等待恢复验证 %2 · 等待决策 %3 · 协议事件 %4")
+            "未解决 %1 · 等待恢复验证 %2 · 等待决策 %3 · 协议事件 %4 · 当前显示 %5")
             .arg(static_cast<qulonglong>(unresolved))
             .arg(static_cast<qulonglong>(waiting_verification))
             .arg(static_cast<qulonglong>(waiting_decision))
-            .arg(static_cast<qulonglong>(projection.events.size())));
+            .arg(static_cast<qulonglong>(projection.events.size()))
+            .arg(static_cast<qulonglong>(visible_events.size())));
 
     QStringList diagnostics;
     diagnostics
@@ -2645,7 +3450,9 @@ void QtMainWindow::render_event_timeline() {
             issue.task_id.empty() ? QStringLiteral("—") : q(issue.task_id));
         task->setData(Qt::UserRole, q(issue.task_id));
         issues_->setItem(row, 0, task);
-        issues_->setItem(row, 1, new QTableWidgetItem(q(issue.issue_id)));
+        auto* issue_item = new QTableWidgetItem(q(issue.issue_id));
+        issue_item->setData(Qt::UserRole, q(issue.issue_id));
+        issues_->setItem(row, 1, issue_item);
 
         auto* state = new QTableWidgetItem(
             q(issue_state_display_name(issue.state)));
@@ -2680,23 +3487,50 @@ void QtMainWindow::render_event_timeline() {
     }
     issues_->resizeColumnsToContents();
 
-    event_timeline_->setRowCount(static_cast<int>(projection.events.size()));
-    for (int row = 0; row < static_cast<int>(projection.events.size()); ++row) {
+    event_timeline_->setRowCount(
+        static_cast<int>(visible_events.size()));
+    for (int row = 0;
+         row < static_cast<int>(visible_events.size());
+         ++row) {
         const auto& event =
-            projection.events[projection.events.size() - 1 -
-                              static_cast<std::size_t>(row)];
+            *visible_events[static_cast<std::size_t>(row)];
 
         event_timeline_->setItem(
-            row, 0, new QTableWidgetItem(q(short_time(event.occurred_at))));
+            row,
+            0,
+            new QTableWidgetItem(q(short_time(event.occurred_at))));
 
-        auto* type = new QTableWidgetItem(q(event_display_name(event.event_type)));
+        auto* type =
+            new QTableWidgetItem(q(event_display_name(event.event_type)));
+        type->setData(Qt::UserRole, q(event.event_id));
+        type->setData(Qt::UserRole + 1, q(event.task_id));
+        type->setData(Qt::UserRole + 2, q(event.issue_id));
+        if (!event.evidence_refs.empty()) {
+            const auto evidence = q(event.evidence_refs.front());
+            QString resolved_evidence = evidence;
+            if (!QFileInfo::exists(resolved_evidence)) {
+                if (const auto* project = current_project()) {
+                    const auto root = q(s(project->if_contains("dir")));
+                    if (!root.isEmpty()) {
+                        const auto candidate =
+                            QDir(root).filePath(evidence);
+                        if (QFileInfo::exists(candidate))
+                            resolved_evidence = candidate;
+                    }
+                }
+            }
+            if (QFileInfo::exists(resolved_evidence))
+                type->setData(Qt::UserRole + 3, resolved_evidence);
+        }
+
         if (event.event_type == "issue.user_action_required" ||
             event.event_type == "issue.escalated")
             emphasize_item(type, QColor(QStringLiteral("#9A641F")));
         else if (event.event_type == "issue.recovery_verified" ||
                  event.event_type == "issue.resolved")
             emphasize_item(type, QColor(QStringLiteral("#3F7D5A")));
-        else if (event.severity == "error" || event.severity == "critical" ||
+        else if (event.severity == "error" ||
+                 event.severity == "critical" ||
                  event.event_type == "agent.failed")
             emphasize_item(type, QColor(QStringLiteral("#A34747")));
         event_timeline_->setItem(row, 1, type);
@@ -2705,25 +3539,41 @@ void QtMainWindow::render_event_timeline() {
             row,
             2,
             new QTableWidgetItem(
-                event.task_id.empty() ? QStringLiteral("—") : q(event.task_id)));
+                event.task_id.empty()
+                    ? QStringLiteral("—")
+                    : q(event.task_id)));
+        event_timeline_->setItem(
+            row,
+            3,
+            new QTableWidgetItem(
+                event.issue_id.empty()
+                    ? QStringLiteral("—")
+                    : q(event.issue_id)));
 
         QString source = q(event.source_kind);
         if (!event.source_id.empty())
             source += QStringLiteral(" · ") + q(event.source_id);
-        event_timeline_->setItem(row, 3, new QTableWidgetItem(source));
+        event_timeline_->setItem(
+            row,
+            4,
+            new QTableWidgetItem(source));
 
         auto* summary = new QTableWidgetItem(
             event.summary.empty()
                 ? q(event_display_name(event.event_type))
                 : q(event.summary));
+        QStringList tooltip;
+        tooltip << QStringLiteral("event_id=%1").arg(q(event.event_id));
+        if (!event.correlation_id.empty())
+            tooltip << QStringLiteral("correlation=%1")
+                           .arg(q(event.correlation_id));
         if (!event.evidence_refs.empty()) {
-            QStringList evidence;
-            evidence << QStringLiteral("Evidence:");
+            tooltip << QStringLiteral("Evidence:");
             for (const auto& ref : event.evidence_refs)
-                evidence << QStringLiteral("• ") + q(ref);
-            summary->setToolTip(evidence.join(QStringLiteral("\n")));
+                tooltip << QStringLiteral("• ") + q(ref);
         }
-        event_timeline_->setItem(row, 4, summary);
+        summary->setToolTip(tooltip.join(QStringLiteral("\n")));
+        event_timeline_->setItem(row, 5, summary);
     }
     event_timeline_->resizeColumnsToContents();
 }

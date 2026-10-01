@@ -75,6 +75,7 @@ if(MONITOR_HUB_BUILD_QT)
         src/qt_desktop_controller.cpp
         src/qt_desktop_settings.cpp
         src/qt_app_logger.cpp
+        src/qt_search.cpp
     )
     qt_add_resources(monitor_hub_qt monitor_hub_resources
         PREFIX "/monitor_hub"
@@ -117,6 +118,7 @@ if(BUILD_TESTING)
             tests/qt_desktop_settings_tests.cpp
             src/qt_desktop_settings.cpp
             src/qt_app_logger.cpp
+            src/qt_search.cpp
         )
         target_include_directories(
             monitor_hub_qt_desktop_settings_tests

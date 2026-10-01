@@ -20,6 +20,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QInputDialog>
 #include <QKeySequence>
 #include <QNetworkInformation>
 #include <QLabel>
@@ -439,6 +440,113 @@ void QtDesktopController::show_settings_dialog() {
         layout->addWidget(note);
     }
 
+    bool restored_configuration = false;
+    auto* config_actions = new QHBoxLayout();
+    auto* backup_config =
+        new QPushButton(QStringLiteral("备份当前配置"), &dialog);
+    auto* restore_config =
+        new QPushButton(QStringLiteral("恢复配置…"), &dialog);
+    backup_config->setToolTip(
+        QStringLiteral(
+            "保存当前桌面偏好、数据路径、开机启动和 Recent Files。"
+            "最多保留最近 5 份。"));
+    restore_config->setToolTip(
+        QStringLiteral(
+            "从最近配置快照恢复。不会修改项目结果、任务状态或事件历史。"));
+    config_actions->addWidget(backup_config);
+    config_actions->addWidget(restore_config);
+    config_actions->addStretch();
+    layout->addLayout(config_actions);
+
+    connect(backup_config, &QPushButton::clicked, &dialog, [&dialog] {
+        QString error;
+        const auto path = create_desktop_config_backup(&error);
+        if (path.isEmpty()) {
+            QMessageBox::warning(
+                &dialog,
+                QStringLiteral("配置备份失败"),
+                error.isEmpty()
+                    ? QStringLiteral("无法创建配置备份。")
+                    : error);
+            return;
+        }
+        QMessageBox::information(
+            &dialog,
+            QStringLiteral("配置已备份"),
+            QStringLiteral("已保存到：\n%1")
+                .arg(QDir::toNativeSeparators(path)));
+    });
+
+    connect(
+        restore_config,
+        &QPushButton::clicked,
+        &dialog,
+        [&dialog, &restored_configuration] {
+            const auto backups = list_desktop_config_backups();
+            if (backups.empty()) {
+                QMessageBox::information(
+                    &dialog,
+                    QStringLiteral("恢复配置"),
+                    QStringLiteral("当前还没有可恢复的配置快照。"));
+                return;
+            }
+
+            QStringList labels;
+            for (const auto& backup : backups) {
+                labels << QStringLiteral("%1  ·  %2")
+                              .arg(
+                                  backup.captured_at,
+                                  QFileInfo(backup.path).fileName());
+            }
+
+            bool ok = false;
+            const auto selected = QInputDialog::getItem(
+                &dialog,
+                QStringLiteral("恢复配置"),
+                QStringLiteral("选择要恢复的配置快照："),
+                labels,
+                0,
+                false,
+                &ok);
+            if (!ok || selected.isEmpty()) return;
+            const int index = labels.indexOf(selected);
+            if (index < 0 ||
+                index >= static_cast<int>(backups.size())) {
+                return;
+            }
+
+            QString backup_error;
+            const auto undo_backup =
+                create_desktop_config_backup(&backup_error);
+            if (undo_backup.isEmpty()) {
+                const auto answer = QMessageBox::question(
+                    &dialog,
+                    QStringLiteral("无法创建恢复前备份"),
+                    QStringLiteral(
+                        "无法先备份当前配置：%1\n\n仍然继续恢复吗？")
+                        .arg(backup_error),
+                    QMessageBox::Yes | QMessageBox::No,
+                    QMessageBox::No);
+                if (answer != QMessageBox::Yes) return;
+            }
+
+            QString restore_error;
+            if (!restore_desktop_config_backup(
+                    backups[static_cast<std::size_t>(index)].path,
+                    &restore_error)) {
+                QMessageBox::warning(
+                    &dialog,
+                    QStringLiteral("配置恢复未完全成功"),
+                    restore_error.isEmpty()
+                        ? QStringLiteral("无法恢复所选配置。")
+                        : restore_error);
+                return;
+            }
+
+            restored_configuration = true;
+            dialog.accept();
+        });
+
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         &dialog);
@@ -448,10 +556,48 @@ void QtDesktopController::show_settings_dialog() {
 
     if (dialog.exec() != QDialog::Accepted) return;
 
-    QString error;
+    if (restored_configuration) {
+        const auto restored = load_desktop_settings();
+        const bool automatic_control_changed =
+            restored.automatic_control != settings_.automatic_control;
+        settings_ = restored;
+        apply_control_timer_state(
+            automatic_control_changed && settings_.automatic_control);
+        if (settings_.notifications)
+            poll_durable_notifications(false);
+        QMessageBox::information(
+            window_,
+            QStringLiteral("配置已恢复"),
+            QStringLiteral(
+                "桌面偏好已恢复。登记表 / Hub 数据目录等运行路径"
+                "会在下次启动 Monitor Hub 时完整生效。"));
+        return;
+    }
+
     const bool automatic_control_changed =
         automatic_control->isChecked() != current.automatic_control;
+    const bool configuration_changed =
+        automatic_control_changed ||
+        close_to_tray->isChecked() != current.close_to_tray ||
+        notifications->isChecked() != current.notifications ||
+        registry_path->text().trimmed() != current.registry_path.trimmed() ||
+        hub_data_path->text().trimmed() != current.hub_data_path.trimmed() ||
+        (launch_at_login->isEnabled() &&
+         launch_at_login->isChecked() != current.launch_at_login);
 
+    if (configuration_changed) {
+        QString backup_error;
+        if (create_desktop_config_backup(&backup_error).isEmpty()) {
+            QMessageBox::warning(
+                window_,
+                QStringLiteral("配置备份失败"),
+                QStringLiteral(
+                    "新设置仍会继续保存，但旧配置没有成功备份：%1")
+                    .arg(backup_error));
+        }
+    }
+
+    QString error;
     if (!save_desktop_preferences(
             close_to_tray->isChecked(),
             notifications->isChecked(),
@@ -506,7 +652,9 @@ void QtDesktopController::show_about_dialog() {
             "面向长任务与 Agent 工作流的本地监控、恢复与审计控制台。\n\n"
             "Qt %1\n"
             "快捷键：F5 刷新 · Ctrl+N 新建监控 · Ctrl+K 项目列表 · "
-            "Ctrl+, 设置 · Ctrl+Shift+L 日志 · F1 关于 · Ctrl+Q 退出")
+            "Ctrl+F 搜索 · Ctrl+, 设置 · Ctrl+Shift+L 日志 · "
+            "F1 关于 · Ctrl+Q 退出\n"
+            "支持拖入本地目录、登记表和常见日志/文档文件。")
             .arg(QString::fromLatin1(qVersion())));
     dialog.setStandardButtons(QMessageBox::Ok);
     dialog.exec();
