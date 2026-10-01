@@ -1,0 +1,7 @@
+{
+  "command": "node",
+  "args": ["C:\\path\\to\\monitor-hub-mcp\\src\\index.mjs"],
+  "env": {
+    "MONITOR_HUB_DATA": "C:\\Users\\YOU\\AppData\\Local\\Monitor Hub"
+  }
+}
