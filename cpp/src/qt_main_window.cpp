@@ -2101,11 +2101,11 @@ void QtMainWindow::render_project_qa() {
         qa_status_->setText(
             QStringLiteral("项目专属 Agent · %1 · 待回答 %2")
                 .arg(identity)
-                .arg(pending.size()));
+                .arg(static_cast<qulonglong>(pending.size())));
     } else {
         qa_status_->setText(
             QStringLiteral("尚未绑定发起 Agent · 消息会保存在项目通道中 · 待回答 %1")
-                .arg(pending.size()));
+                .arg(static_cast<qulonglong>(pending.size())));
     }
 
     auto cursor = qa_history_->textCursor();
@@ -2978,10 +2978,6 @@ void QtMainWindow::open_new_monitor_dialog(const QString& prefilled_workdir) {
                 q(fields->workdir))) {
             ProjectAgentBinding binding;
             binding.provider = "claude_code";
-            binding.agent_id =
-                current_agent.agent_name.empty()
-                    ? std::string("claude-code")
-                    : current_agent.agent_name;
             binding.session_id = current_agent.session_id;
             binding.session_name = current_agent.session_name;
             binding.workspace = agent_workspace;
