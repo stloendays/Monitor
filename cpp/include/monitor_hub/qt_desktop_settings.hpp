@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QString>
 
 namespace monitor_hub {
@@ -13,7 +14,15 @@ struct DesktopSettings {
     QString hub_data_path;
 };
 
+struct DesktopUiState {
+    QByteArray window_geometry;
+    QByteArray window_state;
+    QString project_id;
+    int tab_index = 0;
+};
+
 DesktopSettings load_desktop_settings();
+DesktopUiState load_desktop_ui_state();
 
 bool save_desktop_preferences(
     bool close_to_tray,
@@ -25,6 +34,15 @@ bool save_runtime_locations(
     const QString& registry_path,
     const QString& hub_data_path,
     QString* error_message = nullptr);
+
+bool save_desktop_ui_state(
+    const DesktopUiState& state,
+    QString* error_message = nullptr);
+
+bool begin_desktop_session(
+    bool* previous_session_clean = nullptr,
+    QString* error_message = nullptr);
+bool end_desktop_session(QString* error_message = nullptr);
 
 bool launch_at_login_enabled();
 bool set_launch_at_login(bool enabled, QString* error_message = nullptr);
