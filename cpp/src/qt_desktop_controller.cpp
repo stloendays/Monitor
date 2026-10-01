@@ -589,7 +589,7 @@ void QtDesktopController::update_network_state(bool disconnected) {
 
     if (disconnected) {
         if (retry_timer_) retry_timer_->stop();
-        set_control_status(QStringLiteral("自动处理：网络离线，等待恢复"));
+        set_control_status(QStringLiteral("自动处理：网络离线（本地继续）"));
         qWarning() << "network reachability changed to disconnected";
         if (settings_.notifications &&
             tray_available() &&
@@ -597,7 +597,7 @@ void QtDesktopController::update_network_state(bool disconnected) {
             tray_->showMessage(
                 QStringLiteral("Monitor Hub · 网络连接中断"),
                 QStringLiteral(
-                    "需要网络的操作将暂停并退避；本地监控、日志和状态读取仍继续。"),
+                    "联网相关动作失败时会退避重试；本地状态读取和已授权的确定性控制仍继续。"),
                 QSystemTrayIcon::Warning,
                 5500);
         }
@@ -726,7 +726,6 @@ void QtDesktopController::apply_control_timer_state(bool run_immediately) {
 
 void QtDesktopController::start_control_tick() {
     if (force_quit_ ||
-        network_disconnected_ ||
         !settings_.automatic_control ||
         control_process_) {
         return;
