@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <regex>
@@ -145,9 +146,11 @@ bool ProjectAgentBinding::empty() const noexcept {
 
 bool valid_project_agent_id(const std::string& project_id) {
     if (project_id.empty() || project_id.size() > 160) return false;
-    static const std::regex allowed(R"(^[A-Za-z0-9_.:-]+$)");
-    return std::regex_match(project_id, allowed) &&
-           project_id.find("..") == std::string::npos;
+    for (const unsigned char ch : project_id) {
+        if (ch < 0x20 || ch == '/' || ch == '\\')
+            return false;
+    }
+    return true;
 }
 
 fs::path project_agent_channel_directory(
@@ -156,7 +159,19 @@ fs::path project_agent_channel_directory(
 
     if (!valid_project_agent_id(project_id))
         throw std::invalid_argument("invalid project Agent channel id: " + project_id);
-    return paths.hub_data / "agent-channels" / project_id;
+
+    std::ostringstream encoded;
+    encoded << std::uppercase << std::hex;
+    for (const unsigned char ch : project_id) {
+        if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.') {
+            encoded << static_cast<char>(ch);
+        } else {
+            encoded << '%' << std::setw(2) << std::setfill('0')
+                    << static_cast<unsigned int>(ch)
+                    << std::setfill(' ');
+        }
+    }
+    return paths.hub_data / "agent-channels" / encoded.str();
 }
 
 ProjectAgentChannel load_project_agent_channel(
