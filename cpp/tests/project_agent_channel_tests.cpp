@@ -21,6 +21,10 @@ int main() {
 
     assert(valid_project_agent_id("alpha"));
     assert(valid_project_agent_id("project:alpha"));
+    assert(
+        project_agent_channel_directory(paths, "project:alpha")
+            .filename()
+            .string() == "project%3Aalpha");
     assert(!valid_project_agent_id("../alpha"));
     assert(!valid_project_agent_id("alpha/beta"));
 
