@@ -1963,7 +1963,22 @@ void QtMainWindow::start_project_question(const QString& live_context) {
 
     qa_process_ = new QProcess(this);
     qa_process_->setProcessChannelMode(QProcess::MergedChannels);
-    qa_process_->setProgram(q(claude.executable.string()));
+    const auto claude_program = q(claude.executable.string());
+#ifdef Q_OS_WIN
+    const auto suffix = QFileInfo(claude_program).suffix().toLower();
+    if (suffix == QStringLiteral("cmd") || suffix == QStringLiteral("bat")) {
+        qa_process_->setProgram(
+            QProcessEnvironment::systemEnvironment().value(
+                QStringLiteral("COMSPEC"),
+                QStringLiteral("cmd.exe")));
+        args.prepend(claude_program);
+        args.prepend(QStringLiteral("/c"));
+    } else {
+        qa_process_->setProgram(claude_program);
+    }
+#else
+    qa_process_->setProgram(claude_program);
+#endif
     qa_process_->setArguments(args);
     const auto cwd = s(project->if_contains("qa_cwd"), s(project->if_contains("dir")));
     if (!cwd.empty()) qa_process_->setWorkingDirectory(q(cwd));
