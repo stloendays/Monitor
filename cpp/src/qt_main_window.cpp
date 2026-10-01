@@ -1323,6 +1323,7 @@ void QtMainWindow::build_ui() {
     tabs_->addTab(result_tab, QStringLiteral("最终结果"));
 
     auto* qa_tab = new QWidget(tabs_);
+    qa_tab->setObjectName(QStringLiteral("qaTab"));
     auto* qa_layout = new QVBoxLayout(qa_tab);
     auto* qa_head = new QHBoxLayout();
     auto* qa_label = new QLabel(QStringLiteral("项目提问"), qa_tab);
@@ -1341,12 +1342,14 @@ void QtMainWindow::build_ui() {
     qa_layout->addLayout(qa_head);
 
     qa_history_ = new QTextEdit(qa_tab);
+    qa_history_->setObjectName(QStringLiteral("qaHistory"));
     qa_history_->setReadOnly(true);
     qa_history_->setPlaceholderText(
         QStringLiteral("这里显示当前项目的只读问答结果。切换项目后不会把答案带到其他项目。"));
     qa_layout->addWidget(qa_history_, 1);
 
     qa_input_ = new QTextEdit(qa_tab);
+    qa_input_->setObjectName(QStringLiteral("qaInput"));
     qa_input_->setPlaceholderText(
         QStringLiteral("例如：现在跑到哪一步？哪个任务有问题？最近一次 takeover 做了什么？"));
     qa_input_->setMaximumHeight(110);
