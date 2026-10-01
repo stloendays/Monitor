@@ -3,6 +3,7 @@
 #include "monitor_hub/core.hpp"
 #include "monitor_hub/claude_cli.hpp"
 #include "monitor_hub/event_store.hpp"
+#include "monitor_hub/qt_search.hpp"
 
 #include <QMainWindow>
 #include <QString>
@@ -13,7 +14,12 @@
 #include <string>
 #include <vector>
 
+class QCheckBox;
+class QComboBox;
+class QDragEnterEvent;
+class QDropEvent;
 class QLabel;
+class QLineEdit;
 class QListWidget;
 class QPushButton;
 class QProgressBar;
@@ -42,6 +48,10 @@ public:
     void trigger_refresh();
     const RuntimePaths& runtime_paths() const noexcept { return paths_; }
 
+protected:
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
+
 private:
     void build_ui();
     void install_shortcuts();
@@ -51,6 +61,7 @@ private:
     void refresh_quick_actions();
     void render_overview();
     void render_sidebar();
+    void filter_sidebar_projects();
     void select_project(const std::string& id);
     void render_project();
     void render_task_detail();
@@ -73,7 +84,12 @@ private:
     void copy_debug_summary();
     void copy_claude_statusline_setup();
     void open_claude_config();
-    void open_new_monitor_dialog();
+    void show_recent_files_menu();
+    void show_search_dialog(const QString& initial_query = {});
+    std::vector<WorkspaceSearchDocument> build_search_documents() const;
+    void activate_search_result(const WorkspaceSearchDocument& result);
+    void handle_dropped_paths(const QStringList& paths);
+    void open_new_monitor_dialog(const QString& prefilled_workdir = {});
 
     RuntimePaths paths_;
     SystemInfo system_;
@@ -84,6 +100,7 @@ private:
     std::string selected_task_id_;
     std::string claude_linked_project_id_;
 
+    QLineEdit* global_search_ = nullptr;
     QListWidget* project_list_ = nullptr;
     QPushButton* new_monitor_ = nullptr;
     QLabel* claude_cli_state_ = nullptr;
@@ -120,6 +137,7 @@ private:
     QPushButton* quick_job_root_ = nullptr;
     QPushButton* quick_copy_command_ = nullptr;
     QPushButton* quick_copy_debug_ = nullptr;
+    QPushButton* quick_recent_ = nullptr;
     QTabWidget* tabs_ = nullptr;
 
     QLabel* overview_counts_ = nullptr;
@@ -141,6 +159,9 @@ private:
     QLabel* event_status_ = nullptr;
     QTableWidget* recovery_flow_ = nullptr;
     QTableWidget* issues_ = nullptr;
+    QLineEdit* event_filter_ = nullptr;
+    QComboBox* event_kind_filter_ = nullptr;
+    QCheckBox* event_current_task_ = nullptr;
     QTableWidget* event_timeline_ = nullptr;
 
     QTableWidget* takeovers_ = nullptr;
