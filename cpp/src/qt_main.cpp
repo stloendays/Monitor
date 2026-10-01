@@ -32,11 +32,6 @@ int main(int argc, char** argv) {
         qInfo().noquote()
             << "Monitor Hub desktop starting, version"
             << QCoreApplication::applicationVersion();
-        QObject::connect(
-            &app,
-            &QCoreApplication::aboutToQuit,
-            &app,
-            [] { monitor_hub::shutdown_desktop_logging(); });
     }
 
     QApplication::setWindowIcon(
@@ -166,5 +161,7 @@ int main(int argc, char** argv) {
 
     desktop.install_system_tray(QApplication::windowIcon());
     desktop.start(background_requested);
-    return app.exec();
+    const int exit_code = app.exec();
+    monitor_hub::shutdown_desktop_logging();
+    return exit_code;
 }
