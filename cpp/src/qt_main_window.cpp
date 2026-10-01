@@ -1642,6 +1642,8 @@ void QtMainWindow::select_project(const std::string& id) {
     if (id == selected_project_) return;
     selected_project_ = id;
     selected_task_id_.clear();
+    qa_live_cache_.clear();
+    if (qa_history_) qa_history_->clear();
     render_project();
     render_context_header();
     refresh_quick_actions();
@@ -1791,7 +1793,6 @@ void QtMainWindow::render_task_detail() {
 
 void QtMainWindow::render_project_qa() {
     const auto* project = current_project();
-    const bool available = project && !s(project->if_contains("builtin")).size();
     const auto has_project = project != nullptr;
     const auto* live = project ? object(project->if_contains("live_query")) : nullptr;
     const bool has_live = live && array(live->if_contains("cmd")) &&
