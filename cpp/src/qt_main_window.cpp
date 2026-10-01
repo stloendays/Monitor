@@ -5,19 +5,26 @@
 
 #include <QApplication>
 #include <QBrush>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QClipboard>
 #include <QColor>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QDialog>
 #include <QFontDatabase>
 #include <QFrame>
 #include <QHeaderView>
+#include <QLineEdit>
 #include <QLabel>
 #include <limits>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QMenu>
+#include <QMimeData>
 #include <QKeySequence>
 #include <QShortcut>
 #include <QPixmap>
@@ -34,6 +41,7 @@
 #include <QTextCursor>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QFile>
 #include <QFileInfo>
 #include <QVBoxLayout>
@@ -106,9 +114,19 @@ bool local_exists(const std::string& path) {
     return std::filesystem::exists(std::filesystem::path(path), ec) && !ec;
 }
 
+fs::path local_fs_path(const QString& path) {
+#ifdef Q_OS_WIN
+    return fs::path(path.toStdWString());
+#else
+    return fs::path(path.toUtf8().toStdString());
+#endif
+}
+
 void open_local(const std::string& path) {
     if (!local_exists(path)) return;
-    QDesktopServices::openUrl(QUrl::fromLocalFile(q(path)));
+    const auto local = q(path);
+    remember_recent_path(local);
+    QDesktopServices::openUrl(QUrl::fromLocalFile(local));
 }
 
 QColor health_color(const std::string& health) {
@@ -350,6 +368,7 @@ QtMainWindow::QtMainWindow(RuntimePaths paths, QWidget* parent)
     : QMainWindow(parent), paths_(std::move(paths)) {
     build_ui();
     install_shortcuts();
+    setAcceptDrops(true);
     resize(1420, 900);
     setWindowTitle(QStringLiteral("Monitor Hub"));
     refresh();
@@ -374,6 +393,14 @@ void QtMainWindow::install_shortcuts() {
         new QShortcut(QKeySequence(QStringLiteral("Ctrl+K")), this);
     connect(projects_shortcut, &QShortcut::activated, this, [this] {
         if (project_list_) project_list_->setFocus(Qt::ShortcutFocusReason);
+    });
+
+    auto* search_shortcut =
+        new QShortcut(QKeySequence::Find, this);
+    connect(search_shortcut, &QShortcut::activated, this, [this] {
+        if (!global_search_) return;
+        global_search_->setFocus(Qt::ShortcutFocusReason);
+        global_search_->selectAll();
     });
 
     for (int index = 0; index < 6; ++index) {
@@ -434,6 +461,22 @@ void QtMainWindow::build_ui() {
         QStringLiteral("项目列表来自登记表、Windows Task Scheduler 和 detached monitor 自动发现。"
                        "状态图标是当前运行状态，不是帮助提示。"), sidebar));
     side_layout->addLayout(side_head);
+
+    global_search_ = new QLineEdit(sidebar);
+    global_search_->setPlaceholderText(
+        QStringLiteral("搜索项目、任务、Issue、事件、Recent Files…"));
+    global_search_->setClearButtonEnabled(true);
+    global_search_->setToolTip(
+        QStringLiteral(
+            "输入后会先筛选左侧项目；按 Enter 打开全局搜索结果。"
+            "Ctrl+F 可随时聚焦这里。"));
+    side_layout->addWidget(global_search_);
+    connect(global_search_, &QLineEdit::textChanged, this, [this] {
+        filter_sidebar_projects();
+    });
+    connect(global_search_, &QLineEdit::returnPressed, this, [this] {
+        show_search_dialog(global_search_->text());
+    });
 
     project_list_ = new QListWidget(sidebar);
     project_list_->setObjectName(QStringLiteral("projectList"));
@@ -698,6 +741,11 @@ void QtMainWindow::build_ui() {
     quick_copy_debug_ = make_quick(
         QStringLiteral("复制诊断"),
         QStringLiteral("把当前项目、状态、runner、关键路径和选中任务信息复制到剪贴板，便于发给 Agent 排查。不会复制密码或 token。"));
+    quick_recent_ = make_quick(
+        QStringLiteral("Recent Files"),
+        QStringLiteral(
+            "显示最近从 Monitor Hub 打开的文件和目录。"
+            "拖拽到窗口的本地路径也会进入这里。"));
 
     auto* project_actions = new QHBoxLayout();
     project_actions->setSpacing(7);
@@ -713,7 +761,7 @@ void QtMainWindow::build_ui() {
     system_actions->setSpacing(7);
     for (auto* button : {
              quick_registry_, quick_hub_data_, quick_job_root_,
-             quick_copy_command_, quick_copy_debug_}) {
+             quick_recent_, quick_copy_command_, quick_copy_debug_}) {
         system_actions->addWidget(button);
     }
     system_actions->addStretch();
@@ -772,6 +820,9 @@ void QtMainWindow::build_ui() {
     });
     connect(quick_copy_debug_, &QPushButton::clicked, this, [this] {
         copy_debug_summary();
+    });
+    connect(quick_recent_, &QPushButton::clicked, this, [this] {
+        show_recent_files_menu();
     });
 
     main_layout->addWidget(quick_bar);
@@ -1089,18 +1140,44 @@ void QtMainWindow::build_ui() {
     issues_->horizontalHeader()->setStretchLastSection(true);
     event_layout->addWidget(issues_, 1);
 
+    auto* timeline_head = new QHBoxLayout();
     auto* timeline_label = new QLabel(QStringLiteral("事件时间线"), event_tab);
     timeline_label->setObjectName(QStringLiteral("sectionLabel"));
     timeline_label->setFont(section_font);
-    event_layout->addWidget(timeline_label);
+    timeline_head->addWidget(timeline_label);
+    event_filter_ = new QLineEdit(event_tab);
+    event_filter_->setPlaceholderText(
+        QStringLiteral("筛选事件、任务、Issue、来源或摘要…"));
+    event_filter_->setClearButtonEnabled(true);
+    timeline_head->addWidget(event_filter_, 1);
+    event_kind_filter_ = new QComboBox(event_tab);
+    event_kind_filter_->addItem(QStringLiteral("全部事件"), QString{});
+    event_kind_filter_->addItem(QStringLiteral("Issue"), QStringLiteral("issue."));
+    event_kind_filter_->addItem(QStringLiteral("Agent"), QStringLiteral("agent."));
+    event_kind_filter_->addItem(QStringLiteral("Task"), QStringLiteral("task."));
+    event_kind_filter_->addItem(
+        QStringLiteral("通知"),
+        QStringLiteral("notification."));
+    event_kind_filter_->addItem(
+        QStringLiteral("项目"),
+        QStringLiteral("project."));
+    event_kind_filter_->addItem(
+        QStringLiteral("Monitor"),
+        QStringLiteral("monitor."));
+    timeline_head->addWidget(event_kind_filter_);
+    event_current_task_ =
+        new QCheckBox(QStringLiteral("仅当前任务"), event_tab);
+    timeline_head->addWidget(event_current_task_);
+    event_layout->addLayout(timeline_head);
 
     event_timeline_ = new QTableWidget(event_tab);
     configure_table(event_timeline_);
-    event_timeline_->setColumnCount(5);
+    event_timeline_->setColumnCount(6);
     event_timeline_->setHorizontalHeaderLabels({
         QStringLiteral("时间"),
         QStringLiteral("事件"),
         QStringLiteral("任务"),
+        QStringLiteral("Issue"),
         QStringLiteral("来源"),
         QStringLiteral("摘要"),
     });
@@ -1110,6 +1187,40 @@ void QtMainWindow::build_ui() {
     event_timeline_->verticalHeader()->setVisible(false);
     event_timeline_->horizontalHeader()->setStretchLastSection(true);
     event_layout->addWidget(event_timeline_, 2);
+
+    connect(event_filter_, &QLineEdit::textChanged, this, [this] {
+        render_event_timeline();
+    });
+    connect(
+        event_kind_filter_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [this](int) { render_event_timeline(); });
+    connect(event_current_task_, &QCheckBox::toggled, this, [this](bool) {
+        render_event_timeline();
+    });
+    connect(
+        event_timeline_,
+        &QTableWidget::cellDoubleClicked,
+        this,
+        [this](int row, int) {
+            auto* type = event_timeline_->item(row, 1);
+            if (!type) return;
+            const auto evidence =
+                type->data(Qt::UserRole + 3).toString();
+            if (!evidence.isEmpty() &&
+                QFileInfo::exists(evidence)) {
+                open_local(evidence.toUtf8().toStdString());
+                return;
+            }
+            const auto task_id =
+                type->data(Qt::UserRole + 1).toString();
+            if (task_id.isEmpty()) return;
+            selected_task_id_ =
+                task_id.toUtf8().toStdString();
+            render_project();
+            if (tabs_) tabs_->setCurrentIndex(1);
+        });
 
     connect(
         recovery_flow_,
