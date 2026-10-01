@@ -25,6 +25,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QProcess>
+#include <QPushButton>
 #include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QTimer>
