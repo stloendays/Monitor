@@ -41,7 +41,6 @@
 #include <QTextCursor>
 #include <QTimer>
 #include <QUrl>
-#include <QUrlQuery>
 #include <QFile>
 #include <QFileInfo>
 #include <QVBoxLayout>
@@ -2811,7 +2810,7 @@ void QtMainWindow::handle_dropped_paths(const QStringList& dropped_paths) {
         if (box.clickedButton() == create)
             open_new_monitor_dialog(path);
         else if (box.clickedButton() == open)
-            open_local(path.toUtf8().toStdString());
+            open_local(path);
         return;
     }
 
