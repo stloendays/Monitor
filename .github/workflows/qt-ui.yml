@@ -42,7 +42,11 @@ jobs:
 
       - name: Desktop state persistence tests
         shell: pwsh
-        run: ctest --test-dir cpp/build-qt -C Release --output-on-failure -R monitor_hub_qt_desktop_settings_tests
+        run: |
+          $qtRoot = Join-Path $env:RUNNER_TEMP "Qt\6.8.3\msvc2022_64"
+          $env:PATH = "$(Join-Path $qtRoot 'bin');$env:PATH"
+          $env:QT_PLUGIN_PATH = Join-Path $qtRoot "plugins"
+          ctest --test-dir cpp/build-qt -C Release --output-on-failure -R monitor_hub_qt_desktop_settings_tests
 
       - name: Desktop CLI smoke test
         shell: pwsh
