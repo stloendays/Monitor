@@ -36,8 +36,8 @@ int main(int argc, char** argv) {
     }
 
     monitor_hub::DesktopUiState expected;
-    expected.window_geometry = QByteArrayLiteral("geometry-v1");
-    expected.window_state = QByteArrayLiteral("window-state-v1");
+    expected.window_geometry = QByteArray("geometry-v1");
+    expected.window_state = QByteArray("window-state-v1");
     expected.project_id = QStringLiteral("project-alpha");
     expected.tab_index = 4;
 
