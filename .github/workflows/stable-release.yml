@@ -94,7 +94,11 @@ jobs:
 
       - name: Run CTest
         shell: pwsh
-        run: ctest --test-dir cpp/build-release -C Release --output-on-failure
+        run: |
+          $qtRoot = Join-Path $env:RUNNER_TEMP "Qt\6.8.3\msvc2022_64"
+          $env:PATH = "$(Join-Path $qtRoot 'bin');$env:PATH"
+          $env:QT_PLUGIN_PATH = Join-Path $qtRoot "plugins"
+          ctest --test-dir cpp/build-release -C Release --output-on-failure
 
       - name: Verify compiled version contract
         shell: pwsh

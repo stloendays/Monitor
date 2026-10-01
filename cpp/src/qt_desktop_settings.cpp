@@ -1,4 +1,5 @@
 #include "monitor_hub/qt_desktop_settings.hpp"
+#include "monitor_hub/qt_app_logger.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -15,6 +16,11 @@ constexpr auto kNotifications = "desktop/notifications";
 constexpr auto kAutomaticControl = "desktop/automatic_control";
 constexpr auto kRegistryPath = "runtime/registry_path";
 constexpr auto kHubDataPath = "runtime/hub_data_path";
+constexpr auto kWindowGeometry = "ui/window_geometry";
+constexpr auto kWindowState = "ui/window_state";
+constexpr auto kSelectedProject = "ui/selected_project";
+constexpr auto kSelectedTab = "ui/selected_tab";
+constexpr auto kCleanShutdown = "session/clean_shutdown";
 constexpr auto kStartupValueName = "Monitor Hub";
 
 #ifdef Q_OS_WIN
@@ -34,6 +40,13 @@ QString settings_error_text(QSettings::Status status) {
     return QStringLiteral("未知设置错误。");
 }
 
+bool sync_settings(QSettings& settings, QString* error_message) {
+    settings.sync();
+    if (settings.status() == QSettings::NoError) return true;
+    if (error_message) *error_message = settings_error_text(settings.status());
+    return false;
+}
+
 }  // namespace
 
 DesktopSettings load_desktop_settings() {
@@ -48,6 +61,16 @@ DesktopSettings load_desktop_settings() {
     return out;
 }
 
+DesktopUiState load_desktop_ui_state() {
+    QSettings settings;
+    DesktopUiState out;
+    out.window_geometry = settings.value(kWindowGeometry).toByteArray();
+    out.window_state = settings.value(kWindowState).toByteArray();
+    out.project_id = settings.value(kSelectedProject).toString();
+    out.tab_index = settings.value(kSelectedTab, 0).toInt();
+    return out;
+}
+
 bool save_desktop_preferences(
     bool close_to_tray,
     bool notifications,
@@ -57,13 +80,7 @@ bool save_desktop_preferences(
     settings.setValue(kCloseToTray, close_to_tray);
     settings.setValue(kNotifications, notifications);
     settings.setValue(kAutomaticControl, automatic_control);
-    settings.sync();
-
-    if (settings.status() != QSettings::NoError) {
-        if (error_message) *error_message = settings_error_text(settings.status());
-        return false;
-    }
-    return true;
+    return sync_settings(settings, error_message);
 }
 
 bool save_runtime_locations(
@@ -73,12 +90,34 @@ bool save_runtime_locations(
     QSettings settings;
     settings.setValue(kRegistryPath, registry_path.trimmed());
     settings.setValue(kHubDataPath, hub_data_path.trimmed());
-    settings.sync();
-    if (settings.status() != QSettings::NoError) {
-        if (error_message) *error_message = settings_error_text(settings.status());
-        return false;
-    }
-    return true;
+    return sync_settings(settings, error_message);
+}
+
+bool save_desktop_ui_state(
+    const DesktopUiState& state,
+    QString* error_message) {
+    QSettings settings;
+    settings.setValue(kWindowGeometry, state.window_geometry);
+    settings.setValue(kWindowState, state.window_state);
+    settings.setValue(kSelectedProject, state.project_id);
+    settings.setValue(kSelectedTab, state.tab_index);
+    return sync_settings(settings, error_message);
+}
+
+bool begin_desktop_session(
+    bool* previous_session_clean,
+    QString* error_message) {
+    QSettings settings;
+    const bool clean = settings.value(kCleanShutdown, true).toBool();
+    if (previous_session_clean) *previous_session_clean = clean;
+    settings.setValue(kCleanShutdown, false);
+    return sync_settings(settings, error_message);
+}
+
+bool end_desktop_session(QString* error_message) {
+    QSettings settings;
+    settings.setValue(kCleanShutdown, true);
+    return sync_settings(settings, error_message);
 }
 
 QString desktop_startup_command() {
@@ -156,6 +195,7 @@ QString desktop_orchestrator_program() {
 
 QString desktop_diagnostics_text() {
     const auto settings = load_desktop_settings();
+    const auto ui = load_desktop_ui_state();
 
     QStringList lines;
     lines << QStringLiteral("Monitor Hub desktop diagnostics")
@@ -164,6 +204,8 @@ QString desktop_diagnostics_text() {
           << QStringLiteral("executable=%1").arg(
                  QDir::toNativeSeparators(QCoreApplication::applicationFilePath()))
           << QStringLiteral("settings=%1").arg(desktop_settings_storage())
+          << QStringLiteral("log_file=%1").arg(
+                 QDir::toNativeSeparators(desktop_log_file()))
           << QStringLiteral("orchestrator=%1").arg(
                  QDir::toNativeSeparators(desktop_orchestrator_program()))
           << QStringLiteral("orchestrator_exists=%1").arg(
@@ -184,6 +226,8 @@ QString desktop_diagnostics_text() {
                                             : QStringLiteral("false"))
           << QStringLiteral("registry_path=%1").arg(settings.registry_path)
           << QStringLiteral("hub_data_path=%1").arg(settings.hub_data_path)
+          << QStringLiteral("selected_project=%1").arg(ui.project_id)
+          << QStringLiteral("selected_tab=%1").arg(ui.tab_index)
           << QStringLiteral("launch_at_login=%1").arg(
                  settings.launch_at_login ? QStringLiteral("true")
                                           : QStringLiteral("false"));

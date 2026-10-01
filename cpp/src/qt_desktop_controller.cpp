@@ -1,6 +1,8 @@
 #include "monitor_hub/qt_desktop_controller.hpp"
 
 #include "monitor_hub/qt_main_window.hpp"
+#include "monitor_hub/notification_outbox.hpp"
+#include "monitor_hub/qt_app_logger.hpp"
 
 #include <QAction>
 #include <QApplication>
@@ -18,6 +20,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QKeySequence>
+#include <QNetworkInformation>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocalServer>
@@ -26,11 +30,15 @@
 #include <QMessageBox>
 #include <QProcess>
 #include <QPushButton>
+#include <QShortcut>
 #include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QDebug>
+
+#include <vector>
 
 namespace monitor_hub {
 namespace {
@@ -177,6 +185,16 @@ bool QtDesktopController::install_system_tray(const QIcon& icon) {
         copy_diagnostics();
     });
 
+    auto* logs_action = menu->addAction(QStringLiteral("打开日志目录"));
+    connect(logs_action, &QAction::triggered, this, [this] {
+        open_logs();
+    });
+
+    auto* about_action = menu->addAction(QStringLiteral("关于 Monitor Hub…"));
+    connect(about_action, &QAction::triggered, this, [this] {
+        show_about_dialog();
+    });
+
     menu->addSeparator();
     auto* quit_action = menu->addAction(QStringLiteral("退出"));
     connect(quit_action, &QAction::triggered, this, [this] { request_quit(); });
@@ -200,7 +218,47 @@ bool QtDesktopController::install_system_tray(const QIcon& icon) {
 }
 
 void QtDesktopController::start(bool background_requested) {
+    bool previous_session_clean = true;
+    QString session_error;
+    if (!begin_desktop_session(&previous_session_clean, &session_error)) {
+        qWarning().noquote()
+            << "desktop session marker could not be written:" << session_error;
+    } else if (!previous_session_clean) {
+        qWarning() << "previous Monitor Hub desktop session ended uncleanly";
+    }
+
+    window_->restore_desktop_ui_state(load_desktop_ui_state());
+    install_shortcuts();
+    configure_network_monitoring();
+
+    retry_timer_ = new QTimer(this);
+    retry_timer_->setSingleShot(true);
+    connect(retry_timer_, &QTimer::timeout, this, [this] {
+        start_control_tick();
+    });
+
+    state_save_timer_ = new QTimer(this);
+    state_save_timer_->setInterval(15 * 1000);
+    connect(state_save_timer_, &QTimer::timeout, this, [this] {
+        save_ui_state();
+    });
+    state_save_timer_->start();
+
+    connect(
+        QCoreApplication::instance(),
+        &QCoreApplication::aboutToQuit,
+        this,
+        [this] {
+            save_ui_state();
+            QString error;
+            if (!end_desktop_session(&error) && !error.isEmpty()) {
+                qWarning().noquote()
+                    << "clean shutdown marker could not be written:" << error;
+            }
+        });
+
     poll_project_notifications(true);
+    poll_durable_notifications(false);
 
     control_timer_ = new QTimer(this);
     control_timer_->setInterval(60 * 1000);
@@ -214,8 +272,21 @@ void QtDesktopController::start(bool background_requested) {
         notification_timer_->setInterval(65 * 1000);
         connect(notification_timer_, &QTimer::timeout, this, [this] {
             poll_project_notifications(false);
+            poll_durable_notifications(false);
         });
         notification_timer_->start();
+
+        if (!previous_session_clean &&
+            settings_.notifications &&
+            QSystemTrayIcon::supportsMessages()) {
+            tray_->showMessage(
+                QStringLiteral("Monitor Hub · 已从异常退出恢复"),
+                QStringLiteral(
+                    "上一次桌面会话没有正常结束。Monitor Hub 已重新读取实时状态，"
+                    "不会因界面崩溃而重复执行恢复动作。"),
+                QSystemTrayIcon::Warning,
+                6500);
+        }
     }
 
     if (background_requested && tray_available()) {
@@ -235,13 +306,17 @@ void QtDesktopController::show_main_window() {
 
 void QtDesktopController::request_quit() {
     force_quit_ = true;
+    save_ui_state();
     if (notification_timer_) notification_timer_->stop();
     if (control_timer_) control_timer_->stop();
+    if (retry_timer_) retry_timer_->stop();
+    if (state_save_timer_) state_save_timer_->stop();
     if (control_process_ &&
         control_process_->state() != QProcess::NotRunning) {
         control_process_->terminate();
     }
     if (tray_) tray_->hide();
+    qInfo() << "Monitor Hub desktop explicit quit";
     QApplication::quit();
 }
 
@@ -415,6 +490,157 @@ void QtDesktopController::show_settings_dialog() {
     settings_ = load_desktop_settings();
     apply_control_timer_state(
         automatic_control_changed && settings_.automatic_control);
+    if (settings_.notifications) poll_durable_notifications(false);
+}
+
+void QtDesktopController::show_about_dialog() {
+    QMessageBox dialog(window_);
+    dialog.setWindowTitle(QStringLiteral("关于 Monitor Hub"));
+    dialog.setIconPixmap(
+        QApplication::windowIcon().pixmap(64, 64));
+    dialog.setText(
+        QStringLiteral("<b>Monitor Hub %1</b><br/>Agent Operations Console")
+            .arg(QCoreApplication::applicationVersion()));
+    dialog.setInformativeText(
+        QStringLiteral(
+            "面向长任务与 Agent 工作流的本地监控、恢复与审计控制台。\n\n"
+            "Qt %1\n"
+            "快捷键：F5 刷新 · Ctrl+N 新建监控 · Ctrl+K 项目列表 · "
+            "Ctrl+, 设置 · Ctrl+Shift+L 日志 · F1 关于 · Ctrl+Q 退出")
+            .arg(QString::fromLatin1(qVersion())));
+    dialog.setStandardButtons(QMessageBox::Ok);
+    dialog.exec();
+}
+
+void QtDesktopController::open_logs() {
+    QString error;
+    if (open_desktop_log_directory(&error)) return;
+    QMessageBox::warning(
+        window_,
+        QStringLiteral("Monitor Hub"),
+        error.isEmpty()
+            ? QStringLiteral("无法打开日志目录。")
+            : error);
+}
+
+void QtDesktopController::install_shortcuts() {
+    auto* settings_shortcut =
+        new QShortcut(QKeySequence(QStringLiteral("Ctrl+,")), window_);
+    connect(settings_shortcut, &QShortcut::activated, this, [this] {
+        show_settings_dialog();
+    });
+
+    auto* logs_shortcut =
+        new QShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+L")), window_);
+    connect(logs_shortcut, &QShortcut::activated, this, [this] {
+        open_logs();
+    });
+
+    auto* about_shortcut =
+        new QShortcut(QKeySequence(QStringLiteral("F1")), window_);
+    connect(about_shortcut, &QShortcut::activated, this, [this] {
+        show_about_dialog();
+    });
+
+    auto* quit_shortcut =
+        new QShortcut(QKeySequence::Quit, window_);
+    connect(quit_shortcut, &QShortcut::activated, this, [this] {
+        request_quit();
+    });
+}
+
+void QtDesktopController::save_ui_state() {
+    if (!window_) return;
+    QString error;
+    if (!save_desktop_ui_state(window_->desktop_ui_state(), &error) &&
+        !error.isEmpty()) {
+        qWarning().noquote()
+            << "desktop UI state could not be persisted:" << error;
+    }
+}
+
+void QtDesktopController::configure_network_monitoring() {
+    if (!QNetworkInformation::loadDefaultBackend()) {
+        qInfo() << "Qt network reachability backend unavailable;"
+                   " control requests will rely on normal operation errors";
+        return;
+    }
+
+    auto* network = QNetworkInformation::instance();
+    if (!network) return;
+
+    connect(
+        network,
+        &QNetworkInformation::reachabilityChanged,
+        this,
+        [this](QNetworkInformation::Reachability reachability) {
+            update_network_state(
+                reachability == QNetworkInformation::Reachability::Disconnected);
+        });
+
+    update_network_state(
+        network->reachability() ==
+        QNetworkInformation::Reachability::Disconnected);
+}
+
+void QtDesktopController::update_network_state(bool disconnected) {
+    if (network_disconnected_ == disconnected) return;
+    network_disconnected_ = disconnected;
+
+    if (disconnected) {
+        if (retry_timer_) retry_timer_->stop();
+        set_control_status(QStringLiteral("自动处理：网络离线（本地继续）"));
+        qWarning() << "network reachability changed to disconnected";
+        if (settings_.notifications &&
+            tray_available() &&
+            QSystemTrayIcon::supportsMessages()) {
+            tray_->showMessage(
+                QStringLiteral("Monitor Hub · 网络连接中断"),
+                QStringLiteral(
+                    "联网相关动作失败时会退避重试；本地状态读取和已授权的确定性控制仍继续。"),
+                QSystemTrayIcon::Warning,
+                5500);
+        }
+        return;
+    }
+
+    qInfo() << "network reachability recovered";
+    control_retry_attempt_ = 0;
+    control_failure_active_ = false;
+    if (settings_.automatic_control) {
+        set_control_status(QStringLiteral("自动处理：网络已恢复，正在重新检查"));
+        QTimer::singleShot(1000, this, [this] {
+            if (window_) window_->trigger_refresh();
+            start_control_tick();
+        });
+    }
+    if (settings_.notifications &&
+        tray_available() &&
+        QSystemTrayIcon::supportsMessages()) {
+        tray_->showMessage(
+            QStringLiteral("Monitor Hub · 网络已恢复"),
+            QStringLiteral("已恢复联网检查，并重新读取当前项目状态。"),
+            QSystemTrayIcon::Information,
+            4000);
+    }
+}
+
+void QtDesktopController::schedule_control_retry() {
+    if (!retry_timer_ ||
+        retry_timer_->isActive() ||
+        force_quit_ ||
+        network_disconnected_ ||
+        !settings_.automatic_control) {
+        return;
+    }
+
+    constexpr int delays[] = {5, 15, 30, 60, 120};
+    const int index =
+        control_retry_attempt_ < 5 ? control_retry_attempt_ : 4;
+    const int seconds = delays[index];
+    if (control_retry_attempt_ < 5) ++control_retry_attempt_;
+    retry_timer_->start(seconds * 1000);
+    qInfo() << "scheduled control retry in" << seconds << "seconds";
 }
 
 void QtDesktopController::copy_diagnostics() {
@@ -427,6 +653,12 @@ void QtDesktopController::copy_diagnostics() {
                                              : QStringLiteral("false"));
     diagnostics += QStringLiteral("\norchestrator=%1")
                        .arg(QDir::toNativeSeparators(orchestrator_program()));
+    diagnostics += QStringLiteral("\nlog_file=%1")
+                       .arg(QDir::toNativeSeparators(desktop_log_file()));
+    diagnostics += QStringLiteral("\nnetwork_disconnected=%1")
+                       .arg(network_disconnected_
+                                ? QStringLiteral("true")
+                                : QStringLiteral("false"));
 
     QApplication::clipboard()->setText(diagnostics);
 
@@ -454,6 +686,7 @@ void QtDesktopController::set_control_status(const QString& text) {
 }
 
 void QtDesktopController::report_control_failure(const QString& detail) {
+    qWarning().noquote() << "control tick failure:" << detail;
     set_control_status(QStringLiteral("自动处理：异常"));
     if (control_failure_active_) return;
     control_failure_active_ = true;
@@ -546,6 +779,7 @@ void QtDesktopController::start_control_tick() {
                         process->errorString());
             control_process_ = nullptr;
             report_control_failure(detail);
+            schedule_control_retry();
             process->deleteLater();
         });
 
@@ -579,6 +813,7 @@ void QtDesktopController::start_control_tick() {
                             stderr_text.isEmpty()
                                 ? stdout_text.right(1200)
                                 : stderr_text.right(1200)));
+                schedule_control_retry();
                 process->deleteLater();
                 return;
             }
@@ -595,6 +830,7 @@ void QtDesktopController::start_control_tick() {
                     QStringLiteral(
                         "控制面返回了无效 JSON：%1")
                         .arg(parse_error.errorString()));
+                schedule_control_retry();
                 process->deleteLater();
                 return;
             }
@@ -610,6 +846,8 @@ void QtDesktopController::start_control_tick() {
                     .toInt(0);
 
             control_failure_active_ = false;
+            control_retry_attempt_ = 0;
+            if (retry_timer_) retry_timer_->stop();
             if (needs_main_agent) {
                 set_control_status(
                     settings_.automatic_control
@@ -643,6 +881,77 @@ void QtDesktopController::start_control_tick() {
         });
 
     process->start();
+}
+
+void QtDesktopController::poll_durable_notifications(bool baseline_only) {
+    if (!window_) return;
+
+    const auto outbox = sync_notification_outbox(window_->runtime_paths());
+    std::vector<const NotificationRecord*> fresh;
+    for (const auto& item : outbox.items) {
+        if (item.state != "pending") continue;
+        if (!item.target.empty() && item.target != "main_agent") continue;
+        if (notified_outbox_ids_.count(item.notification_id)) continue;
+        fresh.push_back(&item);
+    }
+
+    if (baseline_only) {
+        for (const auto* item : fresh)
+            notified_outbox_ids_.insert(item->notification_id);
+        return;
+    }
+
+    if (!settings_.notifications ||
+        !tray_available() ||
+        !QSystemTrayIcon::supportsMessages()) {
+        return;
+    }
+
+    const std::size_t limit = fresh.size() < 3 ? fresh.size() : 3;
+    for (std::size_t index = 0; index < limit; ++index) {
+        const auto& item = *fresh[index];
+        QString title = QStringLiteral("Monitor Hub · 待处理通知");
+        if (item.reason == "decision_required")
+            title = QStringLiteral("Monitor Hub · 需要决策");
+        else if (item.reason == "project_completed")
+            title = QStringLiteral("Monitor Hub · 项目已完成");
+
+        auto body = concise_summary(item.summary);
+        if (body.isEmpty()) {
+            body = item.project_id.empty()
+                ? QStringLiteral("有新的持久化通知等待处理。")
+                : QStringLiteral("项目 %1 有新的持久化通知。")
+                      .arg(q(item.project_id));
+        }
+        qInfo().noquote()
+            << "desktop durable notification"
+            << q(item.notification_id)
+            << q(item.reason)
+            << body;
+        tray_->showMessage(
+            title,
+            body,
+            item.reason == "decision_required"
+                ? QSystemTrayIcon::Warning
+                : QSystemTrayIcon::Information,
+            6500);
+        notified_outbox_ids_.insert(item.notification_id);
+    }
+
+    if (fresh.size() > limit) {
+        tray_->showMessage(
+            QStringLiteral("Monitor Hub · 还有待处理通知"),
+            QStringLiteral("另有 %1 条持久化通知，可在 Monitor Hub 中查看。")
+                .arg(static_cast<qulonglong>(fresh.size() - limit)),
+            QSystemTrayIcon::Information,
+            5000);
+        for (std::size_t index = limit; index < fresh.size(); ++index)
+            notified_outbox_ids_.insert(fresh[index]->notification_id);
+    }
+
+    for (const auto& diagnostic : outbox.diagnostics) {
+        qWarning().noquote() << "notification outbox:" << q(diagnostic);
+    }
 }
 
 void QtDesktopController::poll_project_notifications(bool baseline_only) {

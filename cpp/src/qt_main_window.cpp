@@ -18,6 +18,8 @@
 #include <limits>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QKeySequence>
+#include <QShortcut>
 #include <QPixmap>
 #include <QProgressBar>
 #include <QProcess>
@@ -347,6 +349,7 @@ QPushButton* info_button(const QString& tooltip, QWidget* parent) {
 QtMainWindow::QtMainWindow(RuntimePaths paths, QWidget* parent)
     : QMainWindow(parent), paths_(std::move(paths)) {
     build_ui();
+    install_shortcuts();
     resize(1420, 900);
     setWindowTitle(QStringLiteral("Monitor Hub"));
     refresh();
@@ -355,6 +358,32 @@ QtMainWindow::QtMainWindow(RuntimePaths paths, QWidget* parent)
     timer_->setInterval(60 * 1000);
     connect(timer_, &QTimer::timeout, this, [this] { refresh(); });
     timer_->start();
+}
+
+void QtMainWindow::install_shortcuts() {
+    auto* refresh_shortcut = new QShortcut(QKeySequence::Refresh, this);
+    connect(refresh_shortcut, &QShortcut::activated, this, [this] { refresh(); });
+
+    auto* new_monitor_shortcut =
+        new QShortcut(QKeySequence(QStringLiteral("Ctrl+N")), this);
+    connect(new_monitor_shortcut, &QShortcut::activated, this, [this] {
+        open_new_monitor_dialog();
+    });
+
+    auto* projects_shortcut =
+        new QShortcut(QKeySequence(QStringLiteral("Ctrl+K")), this);
+    connect(projects_shortcut, &QShortcut::activated, this, [this] {
+        if (project_list_) project_list_->setFocus(Qt::ShortcutFocusReason);
+    });
+
+    for (int index = 0; index < 6; ++index) {
+        auto* tab_shortcut = new QShortcut(
+            QKeySequence(QStringLiteral("Alt+%1").arg(index + 1)),
+            this);
+        connect(tab_shortcut, &QShortcut::activated, this, [this, index] {
+            if (tabs_ && index < tabs_->count()) tabs_->setCurrentIndex(index);
+        });
+    }
 }
 
 void QtMainWindow::build_ui() {
@@ -1272,6 +1301,40 @@ std::vector<QtDesktopProjectState> QtMainWindow::desktop_project_states() const 
     }
 
     return out;
+}
+
+DesktopUiState QtMainWindow::desktop_ui_state() const {
+    DesktopUiState state;
+    state.window_geometry = saveGeometry();
+    state.window_state = saveState();
+    state.project_id = q(selected_project_);
+    state.tab_index = tabs_ ? tabs_->currentIndex() : 0;
+    return state;
+}
+
+void QtMainWindow::restore_desktop_ui_state(const DesktopUiState& state) {
+    if (!state.window_geometry.isEmpty()) restoreGeometry(state.window_geometry);
+    if (!state.window_state.isEmpty()) restoreState(state.window_state);
+
+    if (!state.project_id.trimmed().isEmpty()) {
+        const auto wanted = state.project_id.toUtf8().toStdString();
+        if (snapshots_.count(wanted)) {
+            select_project(wanted);
+            for (int row = 0; project_list_ && row < project_list_->count(); ++row) {
+                auto* item = project_list_->item(row);
+                if (item && item->data(Qt::UserRole).toString() == state.project_id) {
+                    project_list_->setCurrentRow(row);
+                    break;
+                }
+            }
+        }
+    }
+    if (tabs_ && state.tab_index >= 0 && state.tab_index < tabs_->count())
+        tabs_->setCurrentIndex(state.tab_index);
+}
+
+void QtMainWindow::trigger_refresh() {
+    refresh();
 }
 
 void QtMainWindow::render_context_header() {
