@@ -686,6 +686,7 @@ void QtDesktopController::set_control_status(const QString& text) {
 }
 
 void QtDesktopController::report_control_failure(const QString& detail) {
+    qWarning().noquote() << "control tick failure:" << detail;
     set_control_status(QStringLiteral("自动处理：异常"));
     if (control_failure_active_) return;
     control_failure_active_ = true;
@@ -922,6 +923,11 @@ void QtDesktopController::poll_durable_notifications(bool baseline_only) {
                 : QStringLiteral("项目 %1 有新的持久化通知。")
                       .arg(q(item.project_id));
         }
+        qInfo().noquote()
+            << "desktop durable notification"
+            << q(item.notification_id)
+            << q(item.reason)
+            << body;
         tray_->showMessage(
             title,
             body,
