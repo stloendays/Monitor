@@ -3,6 +3,7 @@
 #include "monitor_hub/core.hpp"
 #include "monitor_hub/claude_cli.hpp"
 #include "monitor_hub/event_store.hpp"
+#include "monitor_hub/project_agent_channel.hpp"
 #include "monitor_hub/qt_search.hpp"
 
 #include <QMainWindow>
@@ -175,6 +176,7 @@ private:
     QPushButton* qa_send_ = nullptr;
     QProcess* qa_process_ = nullptr;
     QString qa_live_cache_;
+    QString qa_pending_question_;
 
     QTimer* timer_ = nullptr;
 };

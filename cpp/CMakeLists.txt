@@ -23,6 +23,7 @@ add_library(monitor_hub_core
     src/event_store.cpp
     src/overview.cpp
     src/notification_outbox.cpp
+    src/project_agent_channel.cpp
     src/setup_request.cpp
     src/claude_cli.cpp
     src/windows_probe.cpp
@@ -148,6 +149,19 @@ if(BUILD_TESTING)
     add_executable(monitor_hub_core_tests tests/core_tests.cpp)
     target_link_libraries(monitor_hub_core_tests PRIVATE monitor_hub_core)
     add_test(NAME monitor_hub_core_tests COMMAND monitor_hub_core_tests)
+
+    add_executable(
+        monitor_hub_project_agent_channel_tests
+        tests/project_agent_channel_tests.cpp
+    )
+    target_link_libraries(
+        monitor_hub_project_agent_channel_tests
+        PRIVATE monitor_hub_core
+    )
+    add_test(
+        NAME monitor_hub_project_agent_channel_tests
+        COMMAND monitor_hub_project_agent_channel_tests
+    )
 
     add_executable(
         monitor_hub_command_control_tests

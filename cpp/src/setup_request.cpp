@@ -83,6 +83,8 @@ std::string setup_prompt(
     const RuntimePaths& paths,
     const fs::path& report_file,
     const fs::path& request_file,
+    const fs::path& origin_agent_file,
+    const std::string& request_id,
     const std::string& body,
     const std::string& submitted_at) {
 
@@ -107,12 +109,18 @@ std::string setup_prompt(
         << "15. Emit the existing normalized hub_status.json contract and Protocol v1 facts for issue/action/recovery work so the Qt timeline can project the full flow.\n"
         << "16. Reuse headless scheduling and detached-agent conventions already present in this Monitor repository. Never delete project outputs or change scientific/business method unless the request explicitly authorizes it.\n"
         << "17. On completion write a short Chinese report to: " << report_file.string() << "\n"
-        << "18. The report must include POLICY_REF: <policies/... or none> and AUTO_ACTIONS: <authorized L1/L2 actions or none>. The final report must end with exactly one line: NEEDS_USER: <reason> or NEEDS_USER: none.\n\n"
+        << "18. The report must include POLICY_REF: <policies/... or none> and AUTO_ACTIONS: <authorized L1/L2 actions or none>.\n"
+        << "19. This request belongs to one originating project Agent. After choosing project_id, bind that project to the origin metadata with monitor_hub_cli --agent-bind <project_id> --binding-file " << origin_agent_file.string() << " --hub-data " << paths.hub_data.string() << " when the origin file exists.\n"
+        << "20. Put the original monitoring request into the same project conversation with monitor_hub_cli --agent-post <project_id> --message-file " << request_file.string() << " --agent-kind monitor_request --agent-source monitor_request --agent-correlation " << request_id << " --hub-data " << paths.hub_data.string() << " .\n"
+        << "21. Future questions from Monitor Hub belong to that bound project Agent channel. Do not create a new one-off Q&A Agent/session for each question.\n"
+        << "22. The report must include PROJECT_ID: <project_id>. The final report must end with exactly one line: NEEDS_USER: <reason> or NEEDS_USER: none.\n\n"
         << "Useful repository examples when available:\n"
         << "- examples/command-control/recovery-policy-v1.json\n"
         << "- examples/command-control/recovery-policy-local-restart-v1.json\n"
         << "- examples/command-control/recovery-policy-pbs-restart-v1.json\n\n"
+        << "Request id: " << request_id << "\n"
         << "Request file: " << request_file.string() << "\n"
+        << "Origin Agent binding: " << origin_agent_file.string() << "\n"
         << "Submitted: " << submitted_at << "\n\n"
         << "Request:\n"
         << body << "\n";
@@ -227,7 +235,8 @@ SetupRequestLaunch prepare_setup_request(
     const RuntimePaths& paths,
     const std::string& body,
     const fs::path& requested_workdir,
-    const std::optional<std::string>& stamp_override) {
+    const std::optional<std::string>& stamp_override,
+    const std::optional<ProjectAgentBinding>& origin_agent) {
 
     const auto fields = parse_setup_request_fields(body);
     if (!fields)
@@ -254,10 +263,13 @@ SetupRequestLaunch prepare_setup_request(
 
     SetupRequestLaunch launch;
     launch.stamp = stamp;
+    launch.request_id = "monitor-request-" + stamp;
     launch.job_name = "hub-setup-" + stamp;
     launch.request_file = request_dir / (stamp + "_request.md");
     launch.report_file = request_dir / (stamp + "_report.md");
     launch.prompt_file = request_dir / (stamp + "_prompt.txt");
+    launch.origin_agent_file =
+        request_dir / (stamp + "_origin_agent.json");
     launch.runtime = setup_agent_runtime_from_env();
 
     std::error_code dir_ec;
@@ -270,24 +282,47 @@ SetupRequestLaunch prepare_setup_request(
         fs::path(launch.request_file.string() + ".tmp");
     const auto prompt_tmp =
         fs::path(launch.prompt_file.string() + ".tmp");
+    const auto origin_tmp =
+        fs::path(launch.origin_agent_file.string() + ".tmp");
 
     const auto submitted_at = local_time_text(time_value);
     const auto prompt = setup_prompt(
         paths,
         launch.report_file,
         launch.request_file,
+        launch.origin_agent_file,
+        launch.request_id,
         body,
         submitted_at);
 
     try {
         write_utf8(request_tmp, body + "\n");
         write_utf8(prompt_tmp, prompt);
+
+        if (origin_agent && !origin_agent->empty()) {
+            auto binding = *origin_agent;
+            binding.request_id = launch.request_id;
+            if (binding.bound_at.empty())
+                binding.bound_at = submitted_at;
+            write_utf8(
+                origin_tmp,
+                json::serialize(
+                    project_agent_binding_to_json(binding)) +
+                    "\n");
+        }
+
         fs::rename(request_tmp, launch.request_file);
         fs::rename(prompt_tmp, launch.prompt_file);
+        if (origin_agent && !origin_agent->empty())
+            fs::rename(origin_tmp, launch.origin_agent_file);
     } catch (...) {
         std::error_code cleanup;
         fs::remove(request_tmp, cleanup);
         fs::remove(prompt_tmp, cleanup);
+        fs::remove(origin_tmp, cleanup);
+        fs::remove(launch.request_file, cleanup);
+        fs::remove(launch.prompt_file, cleanup);
+        fs::remove(launch.origin_agent_file, cleanup);
         throw;
     }
 

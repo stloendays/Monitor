@@ -21,9 +21,9 @@
 - **看完成情况**：每个项目一张卡片，状态一眼看清（⚠ 需要你处理 / ⟳ 后台处理中 / ● 正常 / ✔ 已完成 / ⏸ 已暂停）。进度表支持任务下钻：新格式监控提供 `row_meta` 后，双击一行可直接打开该任务目录、日志或结果文件。
 - **看后台 Claude 的处理过程**：监控发现自己处理不了的问题时，会启动一个无头 Claude（`claude -p`）按规程处理。它读了什么、运行了什么命令、得到什么结果，都能实时看到。
 - **看最终结果**：计算全部完成后，结果表和 RESULTS.md 直接在窗口里打开。
-- **提问**：用中文问这个项目的情况。提问会话是真正只读的（只能读文件，不能运行命令、不能改文件）。
+- **项目 Agent**：每个监控项目有自己独立的持久 Agent Channel，并绑定到发出该监控请求的原始 Agent/session。后续提问、原监控请求、实时状态上下文和 Agent 回复放在同一个项目会话里；Qt 不会为每个问题再启动新的 headless `claude -p`。
 - **管理监控**：立即检查一次、暂停、恢复、修改检查间隔。
-- **提交新的监控任务**：按固定格式填写，交给后台 Claude 办理（写监控脚本 → 登记到总台 → 启动 → 出问题自动处理 → 全部完成后交付最终结果）。
+- **提交新的监控任务**：按固定格式填写；bootstrap 办理完成后会把项目绑定回发起请求的 Agent，并把原监控请求写入该项目自己的 Agent Channel（写监控脚本 → 登记到总台 → 启动 → 出问题自动处理 → 全部完成后交付最终结果）。
 
 ![总览](docs/images/overview.png)
 
@@ -97,6 +97,7 @@ Windows 安装版还支持在 **设置** 中保存登记表和 Hub 数据目录�
 - [hub/hub_status.example.json](hub/hub_status.example.json)
 - [docs/MONITOR_NAMING.md](docs/MONITOR_NAMING.md)
 - [docs/UI_GUIDELINES.md](docs/UI_GUIDELINES.md)
+- [docs/PROJECT_AGENT_CHANNEL.md](docs/PROJECT_AGENT_CHANNEL.md)
 
 ## 目录
 
@@ -110,6 +111,7 @@ hub/
 deps/cdesktop-detach.ps1            启动不受 cdesktop 会话影响的后台作业（副本；程序使用 ~/.claude/tools 下的那一份）
 docs/
   ARCHITECTURE.md                   模块、数据约定、健康判定、线程、安全边界
+  PROJECT_AGENT_CHANNEL.md           每项目独立 Agent 会话、origin binding 与 CLI/MCP 接口
   PORTING_TO_CPP.md                 改写为 C++ 的指南：技术栈、逐函数对照、实施顺序、对照测试
   LESSONS_LEARNED.md                开发中遇到的错误和难题，以及怎么解决的
   images/                           截图（演示数据）
@@ -126,6 +128,7 @@ C++ 主线目前包含：
 - Monitor 项目/任务/Issue/Agent Event 统一投影；
 - Qt 6 桌面 UI、系统托盘、单实例、设置与通知；
 - Claude CLI 用量/session/workspace/statusLine 集成；
+- 每项目独立的 Project Agent Channel（origin session 绑定、持久消息、CLI/MCP 接口；Qt 提问不启动模型 CLI）；
 - policy-bounded L1/L2/L3 command control；
 - deterministic local/PBS recovery handlers；
 - durable notification outbox；

@@ -467,14 +467,25 @@ int main() {
     assert(setup_fields->project_name == "Qt intake test");
     assert(setup_fields->workdir == setup_project_dir.string());
 
+    ProjectAgentBinding setup_origin;
+    setup_origin.provider = "claude_code";
+    setup_origin.agent_id = "origin-agent";
+    setup_origin.session_id = "origin-session";
+    setup_origin.session_name = "Origin monitor request";
+    setup_origin.workspace = setup_project_dir.string();
+
     const auto setup_launch = prepare_setup_request(
         paths,
         setup_body,
         setup_project_dir,
-        std::string("20300101-010203"));
+        std::string("20300101-010203"),
+        setup_origin);
     assert(setup_launch.job_name == "hub-setup-20300101-010203");
+    assert(setup_launch.request_id ==
+           "monitor-request-20300101-010203");
     assert(fs::exists(setup_launch.request_file));
     assert(fs::exists(setup_launch.prompt_file));
+    assert(fs::exists(setup_launch.origin_agent_file));
     assert(setup_launch.working_directory == setup_project_dir);
     assert(read_text(setup_launch.request_file).find("Qt intake test") !=
            std::string::npos);
@@ -487,6 +498,18 @@ int main() {
            std::string::npos);
     assert(setup_prompt_text.find("NEEDS_USER:") !=
            std::string::npos);
+    assert(setup_prompt_text.find("PROJECT_ID:") !=
+           std::string::npos);
+    assert(setup_prompt_text.find("monitor_hub_cli --agent-bind") !=
+           std::string::npos);
+    assert(setup_prompt_text.find("monitor_hub_cli --agent-post") !=
+           std::string::npos);
+    const auto origin_json = read_json(setup_launch.origin_agent_file);
+    assert(origin_json && origin_json->is_object());
+    assert(origin_json->as_object().at("session_id").as_string() ==
+           "origin-session");
+    assert(origin_json->as_object().at("request_id").as_string() ==
+           setup_launch.request_id);
     assert(setup_launch.command.find("--dangerously-skip-permissions") !=
            std::string::npos);
     assert(std::find(
